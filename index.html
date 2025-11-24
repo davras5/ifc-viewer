@@ -3,26 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IFC Viewer & Export</title>
+    <title>IFC Viewer & Export (IFC4 Compatible)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    <!-- SheetJS for Excel -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
     <script type="importmap">
-    {
-        "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-            "web-ifc": "https://unpkg.com/web-ifc@0.0.66/web-ifc-api.js",
-            "web-ifc-viewer": "https://esm.sh/web-ifc-viewer@1.0.217?deps=three@0.160.0,web-ifc@0.0.66"
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.155.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.155.0/examples/jsm/",
+                "web-ifc": "https://unpkg.com/web-ifc@0.0.46/web-ifc-api.js",
+                "web-ifc-three": "https://unpkg.com/web-ifc-three@0.0.126/IFCLoader.js"
+            }
         }
-    }
     </script>
 
     <style>
         body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
-        #viewer-container { width: 100vw; height: 100vh; overflow: hidden; }
+        #viewer-container { width: 100vw; height: 100vh; overflow: hidden; outline: none; }
         
         .glass-panel {
             background: rgba(255, 255, 255, 0.95);
@@ -38,13 +38,12 @@
 
     <div id="viewer-container"></div>
 
-    <!-- UI -->
     <div class="absolute top-5 left-5 w-72 glass-panel rounded-xl p-4 flex flex-col gap-4 z-10">
         <div class="flex items-center gap-3 border-b border-gray-200 pb-3">
             <i class="fa-solid fa-cube text-2xl text-blue-600"></i>
             <div>
                 <h1 class="font-bold text-gray-800 text-lg">IFC Viewer</h1>
-                <p class="text-xs text-gray-500">Stable v1.0.217</p>
+                <p class="text-xs text-gray-500">Engine: web-ifc-three</p>
             </div>
         </div>
 
@@ -72,22 +71,72 @@
     </div>
 
     <script type="module">
-        import { IfcViewerAPI } from 'web-ifc-viewer';
-        import * as WebIFC from 'web-ifc';
         import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { IFCLoader } from 'web-ifc-three';
+        import * as WebIFC from 'web-ifc';
 
-        // --- 1. Init Viewer ---
+        // --- 1. Three.js Boilerplate (Replaces Viewer Wrapper) ---
         const container = document.getElementById('viewer-container');
-        const viewer = new IfcViewerAPI({ container, backgroundColor: new THREE.Color(0x222222) });
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
 
-        // CRITICAL: Set WASM path to exactly match the imported web-ifc version (0.0.50)
-        viewer.IFC.setWasmPath("https://unpkg.com/web-ifc@0.0.66/");
+        // Camera
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 10, 20);
 
-        viewer.grid.setGrid();
-        viewer.axes.setAxes();
+        // Renderer
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        container.appendChild(renderer.domElement);
 
-        // --- 2. State ---
-        let currentModelID = null;
+        // Controls
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+
+        // Lights
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(10, 10, 10);
+        scene.add(dirLight);
+
+        // Grid/Axes
+        const grid = new THREE.GridHelper(50, 50, 0x444444, 0x555555);
+        scene.add(grid);
+        const axes = new THREE.AxesHelper(2);
+        scene.add(axes);
+
+        // --- 2. IFC Loader Setup ---
+        const ifcLoader = new IFCLoader();
+        
+        // CRITICAL: Point to the WASM that matches the API version (0.0.46)
+        ifcLoader.ifcManager.setWasmPath("https://unpkg.com/web-ifc@0.0.46/");
+        
+        // Optimize for speed
+        ifcLoader.ifcManager.setupThreeMeshBVH(
+            "https://unpkg.com/three-mesh-bvh@0.5.23/build/index.module.js"
+        );
+
+        let ifcModel = null;
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Resize Handler
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- 3. UI Logic ---
         const statusDiv = document.getElementById('status');
         const exportBtn = document.getElementById('export-btn');
         const propPanel = document.getElementById('prop-panel');
@@ -99,49 +148,71 @@
             if(type === 'success') setTimeout(() => statusDiv.classList.add('hidden'), 3000);
         }
 
-        // --- 3. Load File ---
+        // --- 4. Load File ---
         document.getElementById('file-input').addEventListener('change', async (e) => {
             const file = e.target.files[0];
             if(!file) return;
 
-            if(currentModelID !== null) {
-                viewer.IFC.dispose();
-                currentModelID = null;
+            // Cleanup previous model
+            if(ifcModel) {
+                scene.remove(ifcModel);
+                ifcModel = null;
                 propPanel.classList.add('hidden');
             }
 
             setStatus(`Loading ${file.name}...`, 'loading');
             exportBtn.disabled = true;
 
+            const url = URL.createObjectURL(file);
+
             try {
-                const model = await viewer.IFC.loadIfc(file, true);
-                currentModelID = model.modelID;
+                ifcModel = await ifcLoader.loadAsync(url);
+                scene.add(ifcModel);
                 
-                // Render graphical lines (optional visual improvement)
-                await viewer.shadowDropper.renderShadow(model.modelID);
+                // Auto-center camera
+                const box = new THREE.Box3().setFromObject(ifcModel);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
                 
+                controls.target.copy(center);
+                camera.position.set(center.x + maxDim, center.y + maxDim / 2, center.z + maxDim);
+                controls.update();
+
                 setStatus("Loaded!", 'success');
                 exportBtn.disabled = false;
             } catch(err) {
                 console.error(err);
-                setStatus("Error loading file", 'error');
+                setStatus("Error loading file. Check console.", 'error');
             }
         });
 
-        // --- 4. Selection ---
-        window.ondblclick = async () => {
-            if(currentModelID === null) return;
-            
-            const result = await viewer.IFC.selector.pickIfcItem(true);
-            if(!result) {
-                viewer.IFC.selector.unpickIfcItems();
-                propPanel.classList.add('hidden');
-                return;
-            }
+        // --- 5. Selection ---
+        const raycaster = new THREE.Raycaster();
+        raycaster.firstHitOnly = true;
+        const mouse = new THREE.Vector2();
 
-            const { modelID, id } = result;
-            const props = await viewer.IFC.getProperties(modelID, id, true);
-            showProps(props);
+        window.ondblclick = async (event) => {
+            if(!ifcModel) return;
+
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            
+            // Raycast against the IFC model
+            const intersects = raycaster.intersectObject(ifcModel);
+            
+            if(intersects.length > 0) {
+                const faceIndex = intersects[0].faceIndex;
+                const geometry = intersects[0].object.geometry;
+                const id = ifcLoader.ifcManager.getExpressId(geometry, faceIndex);
+                
+                const props = await ifcLoader.ifcManager.getItemProperties(ifcModel.modelID, id);
+                showProps(props);
+            } else {
+                propPanel.classList.add('hidden');
+            }
         };
 
         function showProps(props) {
@@ -164,29 +235,24 @@
             propContent.innerHTML = html;
         }
 
-        // --- 5. Export Logic (Category Scanner) ---
+        // --- 6. Export Logic ---
         exportBtn.addEventListener('click', async () => {
-            if(currentModelID === null) return;
+            if(!ifcModel) return;
             setStatus("Generating Excel...", 'loading');
             
-            // List of common IFC Categories to export
-            // This is safer than dumping the whole DB because it uses the index
+            // Categories to export
             const categories = [
-                WebIFC.IFCWALL, WebIFC.IFCWALLSTANDARDCASE,
-                WebIFC.IFCSLAB, WebIFC.IFCROOF,
-                WebIFC.IFCWINDOW, WebIFC.IFCDOOR,
-                WebIFC.IFCCOLUMN, WebIFC.IFCBEAM,
-                WebIFC.IFCFURNISHINGELEMENT, WebIFC.IFCMEMBER,
+                WebIFC.IFCWALL, WebIFC.IFCWALLSTANDARDCASE, WebIFC.IFCSLAB, 
+                WebIFC.IFCROOF, WebIFC.IFCWINDOW, WebIFC.IFCDOOR, 
+                WebIFC.IFCCOLUMN, WebIFC.IFCBEAM, WebIFC.IFCFURNISHINGELEMENT, 
                 WebIFC.IFCPLATE, WebIFC.IFCSTAIR, WebIFC.IFCRAILING
             ];
 
-            const manager = viewer.IFC.loader.ifcManager;
             let exportData = [];
 
             try {
                 for (const category of categories) {
-                    // Get all element IDs of this category
-                    const elements = await manager.getAllItemsOfType(currentModelID, category, true);
+                    const elements = await ifcLoader.ifcManager.getAllItemsOfType(ifcModel.modelID, category, true);
                     
                     for (const el of elements) {
                         exportData.push({

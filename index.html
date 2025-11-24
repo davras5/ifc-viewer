@@ -10,7 +10,7 @@
     <!-- SheetJS for Excel Export -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
-    <!-- Import Map: Upgraded to 0.0.66 for better IFC4 & Memory stability -->
+    <!-- Import Map -->
     <script type="importmap">
         {
             "imports": {
@@ -41,6 +41,12 @@
             border: 1px solid rgba(255, 255, 255, 0.1);
         }
 
+        #status-container {
+            min-height: 40px;
+            display: flex;
+            align-items: center;
+        }
+
         .loader { border: 2px solid #f3f3f3; border-top: 2px solid #3b82f6; border-radius: 50%; width: 12px; height: 12px; animation: spin 1s linear infinite; display: inline-block; margin-right: 8px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
@@ -50,7 +56,7 @@
     <div id="viewer-container"></div>
 
     <!-- Main Controls -->
-    <div class="absolute top-5 left-5 w-72 glass-panel rounded-xl p-4 flex flex-col gap-4 z-10">
+    <div class="absolute top-5 left-5 w-80 glass-panel rounded-xl p-4 flex flex-col gap-4 z-10">
         <div class="flex items-center gap-3 border-b border-gray-200 pb-3">
             <i class="fa-solid fa-cube text-2xl text-blue-600"></i>
             <div>
@@ -71,14 +77,14 @@
             <i class="fa-solid fa-file-excel mr-2"></i> Export Excel
         </button>
 
-        <div id="status" class="hidden text-xs bg-blue-50 text-blue-700 p-2 rounded border border-blue-100"></div>
+        <div id="status" class="hidden text-xs bg-blue-50 text-blue-700 p-2 rounded border border-blue-100 leading-relaxed break-words"></div>
     </div>
 
     <!-- Properties Panel -->
     <div id="prop-panel" class="absolute top-5 right-5 w-80 glass-panel rounded-xl hidden flex-col max-h-[80vh] z-10">
         <div class="p-3 bg-gray-50 border-b flex justify-between items-center rounded-t-xl">
             <span class="font-bold text-xs uppercase text-gray-600">Properties</span>
-            <button onclick="document.getElementById('prop-panel').classList.add('hidden')" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
+            <button onclick="closePropPanel()" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
         </div>
         <div id="prop-content" class="p-3 overflow-y-auto text-xs space-y-2"></div>
     </div>
@@ -97,10 +103,9 @@
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { IFCLoader } from 'web-ifc-three';
         import * as WebIFC from 'web-ifc';
-        
-        // Manual BVH Patching
         import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
         
+        // --- Setup BVH ---
         THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
         THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
         THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -110,22 +115,18 @@
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x222222);
 
-        // Camera
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(0, 10, 20);
 
-        // Renderer
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
         container.appendChild(renderer.domElement);
 
-        // Controls
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
 
-        // Lights
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
         scene.add(ambientLight);
         
@@ -133,7 +134,6 @@
         dirLight.position.set(10, 20, 10);
         scene.add(dirLight);
 
-        // Grid & Axes
         const grid = new THREE.GridHelper(100, 100, 0x444444, 0x555555);
         scene.add(grid);
         const axes = new THREE.AxesHelper(5);
@@ -144,23 +144,28 @@
         let ifcModel = null;
         let isEngineInitialized = false;
 
+        // Selection Material (Red highlight)
+        const highlightMaterial = new THREE.MeshLambertMaterial({
+            color: 0xff3333,
+            transparent: true,
+            opacity: 0.8,
+            depthTest: false
+        });
+        
+        let currentSelection = {
+            modelID: null,
+            id: null,
+            subset: null
+        };
+
         async function initIFCEngine() {
             if (isEngineInitialized) return;
-            
-            // 1. Set WASM Path to match 0.0.66
             ifcLoader.ifcManager.setWasmPath("https://unpkg.com/web-ifc@0.0.66/");
-
-            // 2. Apply Stability Config (Fixes Memory/Origin issues)
             await ifcLoader.ifcManager.applyWebIfcConfig({
                 COORDINATE_TO_ORIGIN: true,
                 USE_FAST_BOOLS: true
             });
-
-            // 3. Setup BVH for speed
-            ifcLoader.ifcManager.setupThreeMeshBVH(
-                "https://unpkg.com/three-mesh-bvh@0.5.23/build/index.module.js"
-            );
-            
+            ifcLoader.ifcManager.setupThreeMeshBVH("https://unpkg.com/three-mesh-bvh@0.5.23/build/index.module.js");
             isEngineInitialized = true;
         }
 
@@ -184,10 +189,30 @@
         const propPanel = document.getElementById('prop-panel');
         const propContent = document.getElementById('prop-content');
 
+        window.closePropPanel = () => {
+            propPanel.classList.add('hidden');
+            // Clear highlighting
+            if (currentSelection.subset && ifcModel) {
+                ifcLoader.ifcManager.removeSubset(ifcModel.modelID, highlightMaterial);
+                currentSelection.subset = null;
+            }
+        };
+
         function setStatus(msg, type='loading') {
             statusDiv.classList.remove('hidden');
-            statusDiv.innerHTML = type === 'loading' ? `<div class="loader"></div>${msg}` : msg;
-            if(type === 'success') setTimeout(() => statusDiv.classList.add('hidden'), 4000);
+            if(type === 'loading') {
+                statusDiv.innerHTML = `<div class="loader"></div>${msg}`;
+                statusDiv.classList.remove('bg-green-50', 'text-green-700', 'bg-red-50', 'text-red-700');
+                statusDiv.classList.add('bg-blue-50', 'text-blue-700');
+            } else if(type === 'success') {
+                statusDiv.innerHTML = `<i class="fa-solid fa-check-circle mr-2"></i>${msg}`;
+                statusDiv.classList.remove('bg-blue-50', 'text-blue-700');
+                statusDiv.classList.add('bg-green-50', 'text-green-700');
+            } else {
+                statusDiv.innerHTML = `<i class="fa-solid fa-exclamation-circle mr-2"></i>${msg}`;
+                statusDiv.classList.remove('bg-blue-50', 'text-blue-700');
+                statusDiv.classList.add('bg-red-50', 'text-red-700');
+            }
         }
 
         // --- 5. File Loading ---
@@ -197,8 +222,9 @@
 
             if(ifcModel) {
                 scene.remove(ifcModel);
+                ifcLoader.ifcManager.removeSubset(ifcModel.modelID, highlightMaterial);
                 ifcModel = null;
-                propPanel.classList.add('hidden');
+                window.closePropPanel();
             }
 
             setStatus(`Initializing Engine & Parsing...`, 'loading');
@@ -207,10 +233,8 @@
             const url = URL.createObjectURL(file);
 
             try {
-                // Ensure config is applied before loading
                 await initIFCEngine();
 
-                // Load the IFC
                 ifcModel = await ifcLoader.loadAsync(url);
                 scene.add(ifcModel);
                 
@@ -225,22 +249,63 @@
                 camera.lookAt(center);
                 controls.update();
 
-                setStatus("Model Loaded Successfully!", 'success');
+                // --- 2. Stats Fix (Robust Counting) ---
+                // Manually sum common architectural elements to avoid IFCPRODUCT abstract issues
+                const cats = [
+                    WebIFC.IFCWALL, WebIFC.IFCWALLSTANDARDCASE, WebIFC.IFCSLAB, 
+                    WebIFC.IFCWINDOW, WebIFC.IFCDOOR, WebIFC.IFCCOLUMN, WebIFC.IFCBEAM,
+                    WebIFC.IFCFURNISHINGELEMENT, WebIFC.IFCBUILDINGELEMENTPROXY, WebIFC.IFCROOF
+                ];
+                
+                let totalCount = 0;
+                for(let cat of cats) {
+                    const items = await ifcLoader.ifcManager.getAllItemsOfType(ifcModel.modelID, cat, false);
+                    totalCount += items.length;
+                }
+                
+                setStatus(`<b>Loaded!</b><br/>~${totalCount} Visible Elements`, 'success');
                 exportBtn.disabled = false;
+
             } catch(err) {
                 console.error("IFC Loading Error:", err);
                 setStatus("Error: " + (err.message || "Failed to load"), 'error');
             }
         });
 
-        // --- 6. Raycasting / Double Click Selection ---
+        // --- 6. Improved Selection (Single Click with Drag Detection) ---
         const raycaster = new THREE.Raycaster();
         raycaster.firstHitOnly = true;
         const mouse = new THREE.Vector2();
+        
+        let isDragging = false;
+        let mouseDownTime = 0;
+        const clickThresholdMs = 200; // Time threshold to distinguish click vs hold
+        const dragThresholdPx = 5; // Pixel movement threshold
 
-        window.ondblclick = async (event) => {
+        let startX = 0;
+        let startY = 0;
+
+        window.addEventListener('pointerdown', (e) => {
+            isDragging = false;
+            mouseDownTime = Date.now();
+            startX = e.clientX;
+            startY = e.clientY;
+        });
+
+        window.addEventListener('pointermove', (e) => {
+            if (Date.now() - mouseDownTime > clickThresholdMs || 
+                Math.abs(e.clientX - startX) > dragThresholdPx || 
+                Math.abs(e.clientY - startY) > dragThresholdPx) {
+                isDragging = true;
+            }
+        });
+
+        window.addEventListener('pointerup', async (event) => {
+            // If we dragged/rotated, do NOT select
+            if(isDragging) return;
             if(!ifcModel) return;
 
+            // --- Raycasting Logic ---
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
             mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
@@ -253,18 +318,35 @@
                 const geometry = intersects[0].object.geometry;
                 const id = ifcLoader.ifcManager.getExpressId(geometry, faceIndex);
                 
+                if(currentSelection.subset) {
+                     ifcLoader.ifcManager.removeSubset(ifcModel.modelID, highlightMaterial);
+                }
+                
+                currentSelection.subset = ifcLoader.ifcManager.createSubset({
+                    modelID: ifcModel.modelID,
+                    ids: [id],
+                    material: highlightMaterial,
+                    scene: scene,
+                    removePrevious: true
+                });
+
                 const props = await ifcLoader.ifcManager.getItemProperties(ifcModel.modelID, id);
                 showProps(props);
             } else {
-                propPanel.classList.add('hidden');
+                window.closePropPanel();
             }
-        };
+        });
 
         function showProps(props) {
             propPanel.classList.remove('hidden');
             const name = props.Name && props.Name.value ? props.Name.value : 'Unnamed Element';
-            
-            let html = `<div class="font-bold text-lg mb-2 text-blue-800">${name}</div>`;
+            const type = props.constructor.name.replace('Ifc', '').toUpperCase();
+
+            let html = `
+                <div class="mb-3">
+                    <div class="font-bold text-lg text-blue-800 leading-tight">${name}</div>
+                    <div class="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded inline-block mt-1">${type}</div>
+                </div>`;
             
             for(const key in props) {
                 const val = props[key];
@@ -272,7 +354,6 @@
                 if(key === 'expressID' || key === 'type') continue;
                 
                 let displayVal = val.value !== undefined ? val.value : val;
-                
                 if(typeof displayVal === 'number') displayVal = Math.round(displayVal * 100) / 100;
                 
                 html += `<div class="flex justify-between border-b border-gray-100 py-1">
@@ -283,10 +364,13 @@
             propContent.innerHTML = html;
         }
 
-        // --- 7. Advanced Excel Export Logic (Multi-Sheet + Properties) ---
+        // --- 7. Optimized Export Logic (Time-Sliced) ---
+        // Helper to let UI breathe
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
         exportBtn.addEventListener('click', async () => {
             if(!ifcModel) return;
-            setStatus("Starting Detailed Export...", 'loading');
+            setStatus("Preparing export...", 'loading');
             
             const categories = [
                 WebIFC.IFCPROJECT, WebIFC.IFCSITE, WebIFC.IFCBUILDING, WebIFC.IFCBUILDINGSTOREY, WebIFC.IFCSPACE,
@@ -301,60 +385,48 @@
 
             try {
                 for (const category of categories) {
-                    // 1. Get Elements
                     const elements = await ifcLoader.ifcManager.getAllItemsOfType(ifcModel.modelID, category, true);
-                    
                     if (elements.length === 0) continue;
 
-                    // 2. Determine Sheet Name (Remove 'Ifc' prefix)
                     const categoryName = elements[0].constructor.name.replace('Ifc', '');
-                    setStatus(`Processing ${categoryName} (${elements.length} items)...`, 'loading');
-
                     let sheetData = [];
 
-                    // 3. Loop through elements and fetch PROPERTIES
-                    for (const el of elements) {
+                    // --- 1. CRASH FIX: Time-Sliced Loop ---
+                    for (let i = 0; i < elements.length; i++) {
+                        // Every 50 items, pause for 10ms to let UI update
+                        if (i % 50 === 0) {
+                            setStatus(`Exporting ${categoryName}: ${Math.round((i/elements.length)*100)}%`, 'loading');
+                            await sleep(10); 
+                        }
+
+                        const el = elements[i];
                         let row = {
                             'ID': el.expressID,
                             'GlobalID': el.GlobalId ? el.GlobalId.value : '',
-                            'Name': el.Name ? el.Name.value : '',
-                            'Description': el.Description ? el.Description.value : ''
+                            'Name': el.Name ? el.Name.value : ''
                         };
 
                         try {
-                            // FETCH PROPERTY SETS (Heavy Operation)
                             const psets = await ifcLoader.ifcManager.getPropertySets(ifcModel.modelID, el.expressID, true);
-                            
                             for (const pset of psets) {
-                                // We are looking for IfcPropertySet (contains lists of values)
                                 if (pset.HasProperties) {
                                     for (const prop of pset.HasProperties) {
-                                        // Ensure it has a Name and a Value
                                         if (prop.Name && prop.Name.value && prop.NominalValue) {
                                             const psetName = pset.Name && pset.Name.value ? pset.Name.value : 'Unknown';
                                             const propName = prop.Name.value;
-                                            
-                                            // Handle various value types
                                             let propVal = prop.NominalValue.value;
-                                            if (typeof propVal === 'number') propVal = parseFloat(propVal.toFixed(3)); // Round numbers
-                                            
-                                            // Format: "Pset_WallCommon.FireRating"
+                                            if (typeof propVal === 'number') propVal = parseFloat(propVal.toFixed(3));
                                             row[`${psetName}.${propName}`] = propVal;
                                         }
                                     }
                                 }
                             }
-                        } catch (err) {
-                            // Fail silently for individual property errors to keep export alive
-                            console.warn(`Error fetching props for ${el.expressID}`, err);
-                        }
+                        } catch (err) { /* ignore */ }
 
                         sheetData.push(row);
                     }
 
-                    // 4. Create Worksheet & Append to Workbook
                     const ws = XLSX.utils.json_to_sheet(sheetData);
-                    // Excel sheet names are limited to 31 chars
                     const safeSheetName = categoryName.substring(0, 31);
                     XLSX.utils.book_append_sheet(wb, ws, safeSheetName);
                     totalSheets++;
@@ -362,9 +434,11 @@
 
                 if(totalSheets === 0) throw new Error("No architectural data found to export.");
 
-                // 5. Download
-                XLSX.writeFile(wb, "IFC_Export_MultiSheet.xlsx");
-                setStatus(`Success! Created ${totalSheets} sheets with property data.`, 'success');
+                setStatus("Finalizing file...", 'loading');
+                await sleep(50); // One last breath
+                XLSX.writeFile(wb, "IFC_Export_Safe.xlsx");
+                
+                setStatus(`Success! Exported ${totalSheets} sheets.`, 'success');
 
             } catch(e) {
                 console.error(e);

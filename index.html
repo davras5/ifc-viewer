@@ -10,7 +10,7 @@
     <!-- SheetJS for Excel Export -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
-    <!-- Import Map: Unified to UNPKG to prevent Three.js context duplication -->
+    <!-- Import Map: Upgraded to 0.0.66 for better IFC4 & Memory stability -->
     <script type="importmap">
         {
             "imports": {
@@ -18,7 +18,7 @@
                 "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.155.0/examples/jsm/",
                 "three/examples/jsm/utils/BufferGeometryUtils": "https://cdn.jsdelivr.net/npm/three@0.155.0/examples/jsm/utils/BufferGeometryUtils.js",
                 "three-mesh-bvh": "https://unpkg.com/three-mesh-bvh@0.5.23/build/index.module.js",
-                "web-ifc": "https://unpkg.com/web-ifc@0.0.46/web-ifc-api.js",
+                "web-ifc": "https://unpkg.com/web-ifc@0.0.66/web-ifc-api.js",
                 "web-ifc-three": "https://unpkg.com/web-ifc-three@0.0.126/IFCLoader.js"
             }
         }
@@ -28,7 +28,6 @@
         body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
         #viewer-container { width: 100vw; height: 100vh; overflow: hidden; outline: none; }
         
-        /* Glassmorphism Panel */
         .glass-panel {
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
@@ -36,46 +35,38 @@
             box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
         }
         
-        /* Loader Animation */
         .loader { border: 2px solid #f3f3f3; border-top: 2px solid #3b82f6; border-radius: 50%; width: 12px; height: 12px; animation: spin 1s linear infinite; display: inline-block; margin-right: 8px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
-    <!-- 3D Container -->
     <div id="viewer-container"></div>
 
-    <!-- Main UI Panel -->
     <div class="absolute top-5 left-5 w-72 glass-panel rounded-xl p-4 flex flex-col gap-4 z-10">
         <div class="flex items-center gap-3 border-b border-gray-200 pb-3">
             <i class="fa-solid fa-cube text-2xl text-blue-600"></i>
             <div>
                 <h1 class="font-bold text-gray-800 text-lg">IFC Viewer</h1>
-                <p class="text-xs text-gray-500">v0.0.126 (Stable)</p>
+                <p class="text-xs text-gray-500">Engine: web-ifc 0.0.66</p>
             </div>
         </div>
 
-        <!-- Hidden File Input -->
         <input type="file" id="file-input" accept=".ifc" class="hidden" />
         
-        <!-- Open Button -->
         <button onclick="document.getElementById('file-input').click()" 
             class="flex items-center justify-center w-full py-2 bg-white border hover:bg-gray-50 rounded-lg text-sm font-medium transition shadow-sm">
             <i class="fa-solid fa-folder-open text-blue-500 mr-2"></i> Open IFC
         </button>
 
-        <!-- Export Button -->
         <button id="export-btn" disabled 
             class="flex items-center justify-center w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition shadow-sm">
             <i class="fa-solid fa-file-excel mr-2"></i> Export Excel
         </button>
 
-        <!-- Status Bar -->
         <div id="status" class="hidden text-xs bg-blue-50 text-blue-700 p-2 rounded border border-blue-100"></div>
     </div>
 
-    <!-- Properties Panel (Right Side) -->
     <div id="prop-panel" class="absolute top-5 right-5 w-80 glass-panel rounded-xl hidden flex-col max-h-[80vh] z-10">
         <div class="p-3 bg-gray-50 border-b flex justify-between items-center rounded-t-xl">
             <span class="font-bold text-xs uppercase text-gray-600">Properties</span>
@@ -90,11 +81,9 @@
         import { IFCLoader } from 'web-ifc-three';
         import * as WebIFC from 'web-ifc';
         
-        // --- Manual BVH Patching (Fixes "computeBoundsTree is not a function") ---
+        // Manual BVH Patching
         import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
         
-        // We explicitly patch the Three.js prototypes to ensure the extension exists
-        // on the exact same THREE instance that the loader is using.
         THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
         THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
         THREE.Mesh.prototype.raycast = acceleratedRaycast;
@@ -133,17 +122,30 @@
         const axes = new THREE.AxesHelper(5);
         scene.add(axes);
 
-        // --- 2. IFC Loader Configuration ---
+        // --- 2. IFC Loader & Init Logic ---
         const ifcLoader = new IFCLoader();
-        
-        ifcLoader.ifcManager.setWasmPath("https://unpkg.com/web-ifc@0.0.46/");
-
-        // Register BVH with the loader so it knows to use the acceleration
-        ifcLoader.ifcManager.setupThreeMeshBVH(
-            "https://unpkg.com/three-mesh-bvh@0.5.23/build/index.module.js"
-        );
-
         let ifcModel = null;
+        let isEngineInitialized = false;
+
+        async function initIFCEngine() {
+            if (isEngineInitialized) return;
+            
+            // 1. Set WASM Path to match 0.0.66
+            ifcLoader.ifcManager.setWasmPath("https://unpkg.com/web-ifc@0.0.66/");
+
+            // 2. Apply Stability Config (Fixes Memory/Origin issues)
+            await ifcLoader.ifcManager.applyWebIfcConfig({
+                COORDINATE_TO_ORIGIN: true,
+                USE_FAST_BOOLS: true
+            });
+
+            // 3. Setup BVH for speed
+            ifcLoader.ifcManager.setupThreeMeshBVH(
+                "https://unpkg.com/three-mesh-bvh@0.5.23/build/index.module.js"
+            );
+            
+            isEngineInitialized = true;
+        }
 
         // --- 3. Animation Loop ---
         function animate() {
@@ -182,12 +184,16 @@
                 propPanel.classList.add('hidden');
             }
 
-            setStatus(`Parsing ${file.name}... this may take a moment`, 'loading');
+            setStatus(`Initializing Engine & Parsing...`, 'loading');
             exportBtn.disabled = true;
 
             const url = URL.createObjectURL(file);
 
             try {
+                // Ensure config is applied before loading
+                await initIFCEngine();
+
+                // Load the IFC
                 ifcModel = await ifcLoader.loadAsync(url);
                 scene.add(ifcModel);
                 
@@ -206,7 +212,7 @@
                 exportBtn.disabled = false;
             } catch(err) {
                 console.error("IFC Loading Error:", err);
-                setStatus("Error loading file. See console for details.", 'error');
+                setStatus("Error: " + (err.message || "Failed to load"), 'error');
             }
         });
 

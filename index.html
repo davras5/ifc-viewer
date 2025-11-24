@@ -1,347 +1,219 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Simple IFC Viewer & Excel Export</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <style>
-    body { margin: 0; overflow: hidden; font-family: sans-serif; }
-    #viewer-container { width: 100vw; height: 100vh; position: relative; background-color: #f0f0f0; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IFC Viewer & Export</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
-    /* Overlay UI */
-    .overlay {
-      position: absolute;
-      top: 20px;
-      left: 20px;
-      z-index: 10;
-      background: rgba(255, 255, 255, 0.9);
-      padding: 1.5rem;
-      border-radius: 12px;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-      max-width: 300px;
-      backdrop-filter: blur(4px);
-    }
+    <!-- SheetJS for Excel -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
-    /* Loading Spinner */
-    .loader {
-      border: 4px solid #f3f3f3;
-      border-top: 4px solid #3b82f6;
-      border-radius: 50%;
-      width: 24px;
-      height: 24px;
-      animation: spin 1s linear infinite;
-      display: inline-block;
-      vertical-align: middle;
-      margin-right: 8px;
-    }
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+                "web-ifc": "https://unpkg.com/web-ifc@0.0.50/web-ifc-api.js",
+                "web-ifc-viewer": "https://esm.sh/web-ifc-viewer@1.0.217?deps=three@0.160.0,web-ifc@0.0.50"
+            }
+        }
+    </script>
 
-    /* Custom Scrollbar for property view */
-    .props-scroll::-webkit-scrollbar { width: 6px; }
-    .props-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
-    .props-scroll::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
-  </style>
-
-  <!-- Import Map -->
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "web-ifc": "https://unpkg.com/web-ifc@0.0.53/web-ifc-api.js",
-        "@thatopen/components": "https://unpkg.com/@thatopen/components@2.3.0/dist/components.js",
-        "@thatopen/components-front": "https://unpkg.com/@thatopen/components-front@2.3.0/dist/components-front.js",
-        "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs"
-      }
-    }
-  </script>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; }
+        #viewer-container { width: 100vw; height: 100vh; overflow: hidden; }
+        
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
+        }
+        .loader { border: 2px solid #f3f3f3; border-top: 2px solid #3b82f6; border-radius: 50%; width: 12px; height: 12px; animation: spin 1s linear infinite; display: inline-block; margin-right: 8px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
 </head>
 <body>
 
-<div id="viewer-container"></div>
+    <div id="viewer-container"></div>
 
-<div class="overlay">
-  <h1 class="text-xl font-bold mb-2 text-gray-800"><i class="fa-solid fa-cube mr-2"></i>IFC Viewer</h1>
-  <p class="text-sm text-gray-600 mb-4">Load an IFC file to view 3D elements and export data to Excel.</p>
-  
-  <div class="space-y-3">
-    <!-- File Input -->
-    <div class="relative">
-      <input type="file" id="file-input" accept=".ifc" class="hidden" />
-      <button onclick="document.getElementById('file-input').click()" 
-              class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition flex items-center justify-center gap-2">
-        <i class="fa-solid fa-folder-open"></i> Load IFC File
-      </button>
+    <!-- UI -->
+    <div class="absolute top-5 left-5 w-72 glass-panel rounded-xl p-4 flex flex-col gap-4 z-10">
+        <div class="flex items-center gap-3 border-b border-gray-200 pb-3">
+            <i class="fa-solid fa-cube text-2xl text-blue-600"></i>
+            <div>
+                <h1 class="font-bold text-gray-800 text-lg">IFC Viewer</h1>
+                <p class="text-xs text-gray-500">Stable v1.0.217</p>
+            </div>
+        </div>
+
+        <input type="file" id="file-input" accept=".ifc" class="hidden" />
+        
+        <button onclick="document.getElementById('file-input').click()" 
+            class="flex items-center justify-center w-full py-2 bg-white border hover:bg-gray-50 rounded-lg text-sm font-medium transition shadow-sm">
+            <i class="fa-solid fa-folder-open text-blue-500 mr-2"></i> Open IFC
+        </button>
+
+        <button id="export-btn" disabled 
+            class="flex items-center justify-center w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition shadow-sm">
+            <i class="fa-solid fa-file-excel mr-2"></i> Export Excel
+        </button>
+
+        <div id="status" class="hidden text-xs bg-blue-50 text-blue-700 p-2 rounded border border-blue-100"></div>
     </div>
 
-    <!-- Export Button (Hidden initially) -->
-    <button id="export-btn" disabled 
-            class="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded transition flex items-center justify-center gap-2">
-      <i class="fa-solid fa-file-excel"></i> Export to Excel
-    </button>
-  </div>
+    <div id="prop-panel" class="absolute top-5 right-5 w-80 glass-panel rounded-xl hidden flex-col max-h-[80vh] z-10">
+        <div class="p-3 bg-gray-50 border-b flex justify-between items-center rounded-t-xl">
+            <span class="font-bold text-xs uppercase text-gray-600">Properties</span>
+            <button onclick="document.getElementById('prop-panel').classList.add('hidden')" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
+        </div>
+        <div id="prop-content" class="p-3 overflow-y-auto text-xs space-y-2"></div>
+    </div>
 
-  <div id="status-msg" class="mt-4 text-sm text-gray-600 font-mono hidden">
-    <!-- Status messages will appear here -->
-  </div>
-</div>
+    <script type="module">
+        import { IfcViewerAPI } from 'web-ifc-viewer';
+        import * as WebIFC from 'web-ifc';
+        import * as THREE from 'three';
 
-<!-- Selection Info Panel (Bottom Left) -->
-<div id="selection-panel" class="absolute bottom-5 left-5 z-10 bg-white/90 p-4 rounded-xl shadow-lg max-w-sm hidden backdrop-blur-sm max-h-96 flex flex-col">
-  <div class="flex justify-between items-center mb-2 border-b pb-2">
-    <h3 class="font-bold text-gray-800">Selected Element</h3>
-    <button onclick="document.getElementById('selection-panel').classList.add('hidden')" class="text-gray-500 hover:text-gray-800">
-      <i class="fa-solid fa-times"></i>
-    </button>
-  </div>
-  <div id="props-content" class="text-xs text-gray-700 overflow-y-auto props-scroll">
-    <!-- Properties injected here -->
-  </div>
-</div>
+        // --- 1. Init Viewer ---
+        const container = document.getElementById('viewer-container');
+        const viewer = new IfcViewerAPI({ container, backgroundColor: new THREE.Color(0x222222) });
 
-<script type="module">
-  import * as THREE from 'three';
-  import * as OBC from '@thatopen/components';
-  import * as XLSX from 'xlsx';
+        // CRITICAL: Set WASM path to exactly match the imported web-ifc version (0.0.50)
+        viewer.IFC.setWasmPath("https://unpkg.com/web-ifc@0.0.50/");
 
-  // --- Global Variables ---
-  let components, world, ifcLoader, highlighter;
-  let currentModel = null;
-  const container = document.getElementById('viewer-container');
-  const statusMsg = document.getElementById('status-msg');
-  const exportBtn = document.getElementById('export-btn');
-  const fileInput = document.getElementById('file-input');
+        viewer.grid.setGrid();
+        viewer.axes.setAxes();
 
-  // --- 1. Initialization (Async) ---
-  async function init() {
-    try {
-      components = new OBC.Components();
-      const worlds = components.get(OBC.Worlds);
+        // --- 2. State ---
+        let currentModelID = null;
+        const statusDiv = document.getElementById('status');
+        const exportBtn = document.getElementById('export-btn');
+        const propPanel = document.getElementById('prop-panel');
+        const propContent = document.getElementById('prop-content');
 
-      world = worlds.create();
-      world.scene = new OBC.SimpleScene(components);
-      world.renderer = new OBC.SimpleRenderer(components, container);
-      world.camera = new OBC.SimpleCamera(components);
-
-      components.init();
-
-      // Grid & Lighting
-      world.scene.setup(); 
-      world.scene.three.background = new THREE.Color('#e0e0e0');
-      
-      // Fix: Adjust lighting so models aren't dark
-      const ambient = new THREE.AmbientLight(0xffffff, 0.6);
-      const dir = new THREE.DirectionalLight(0xffffff, 1.2);
-      dir.position.set(10, 10, 10);
-      world.scene.three.add(ambient, dir);
-
-      // IFC Loader Setup
-      ifcLoader = components.get(OBC.IfcLoader);
-      
-      // Initialize WASM
-      // We use a try-catch specifically here because network issues often happen here
-      await ifcLoader.setup({
-        wasm: {
-          path: "https://unpkg.com/web-ifc@0.0.53/", 
-          absolute: true
+        function setStatus(msg, type='loading') {
+            statusDiv.classList.remove('hidden');
+            statusDiv.innerHTML = type === 'loading' ? `<div class="loader"></div>${msg}` : msg;
+            if(type === 'success') setTimeout(() => statusDiv.classList.add('hidden'), 3000);
         }
-      });
 
-      // Highlighter Setup
-      highlighter = components.get(OBC.Highlighter);
-      highlighter.setup({ world });
-      highlighter.zoomToSelection = true;
-      
-      console.log("Viewer Initialized");
+        // --- 3. Load File ---
+        document.getElementById('file-input').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if(!file) return;
 
-    } catch (err) {
-      console.error("Initialization Error:", err);
-      statusMsg.classList.remove('hidden');
-      statusMsg.innerHTML = `<span class="text-red-600">Failed to initialize viewer. Check console.</span>`;
-    }
-  }
+            if(currentModelID !== null) {
+                viewer.IFC.dispose();
+                currentModelID = null;
+                propPanel.classList.add('hidden');
+            }
 
-  // Call Init
-  init();
+            setStatus(`Loading ${file.name}...`, 'loading');
+            exportBtn.disabled = true;
 
-  // --- 2. Event Listeners (Attached Immediately) ---
-  
-  fileInput.addEventListener('change', async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
+            try {
+                const model = await viewer.IFC.loadIfc(file, true);
+                currentModelID = model.modelID;
+                
+                // Render graphical lines (optional visual improvement)
+                await viewer.shadowDropper.renderShadow(model.modelID);
+                
+                setStatus("Loaded!", 'success');
+                exportBtn.disabled = false;
+            } catch(err) {
+                console.error(err);
+                setStatus("Error loading file", 'error');
+            }
+        });
 
-    if (!ifcLoader) {
-      alert("Viewer is still initializing, please wait a moment.");
-      return;
-    }
+        // --- 4. Selection ---
+        window.ondblclick = async () => {
+            if(currentModelID === null) return;
+            
+            const result = await viewer.IFC.selector.pickIfcItem(true);
+            if(!result) {
+                viewer.IFC.selector.unpickIfcItems();
+                propPanel.classList.add('hidden');
+                return;
+            }
 
-    // UI Updates
-    statusMsg.classList.remove('hidden');
-    statusMsg.innerHTML = '<div class="loader"></div> Loading Model...';
-    exportBtn.disabled = true;
-
-    // Clean up previous
-    if (currentModel) {
-      world.scene.three.remove(currentModel);
-      currentModel = null;
-    }
-
-    const buffer = await file.arrayBuffer();
-    const data = new Uint8Array(buffer);
-    
-    try {
-      // Load the model
-      const model = await ifcLoader.load(data);
-      currentModel = model;
-      world.scene.three.add(model);
-      
-      statusMsg.innerHTML = `<i class="fa-solid fa-check text-green-500"></i> Loaded: ${file.name}`;
-      exportBtn.disabled = false;
-      
-      setupSelection(model);
-      
-    } catch (error) {
-      console.error(error);
-      statusMsg.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-red-500"></i> Error loading file: ${error.message}`;
-    }
-  });
-
-  exportBtn.addEventListener('click', async () => {
-    if (!currentModel) return;
-
-    statusMsg.classList.remove('hidden');
-    statusMsg.innerHTML = '<div class="loader"></div> Generating Excel...';
-
-    setTimeout(async () => {
-      try {
-        await generateExcel(currentModel);
-        statusMsg.innerHTML = `<i class="fa-solid fa-check text-green-500"></i> Excel Exported!`;
-      } catch (e) {
-        console.error(e);
-        statusMsg.innerHTML = 'Error exporting.';
-      }
-    }, 100);
-  });
-
-  // --- 3. Selection Logic ---
-
-  function setupSelection(model) {
-    container.addEventListener('click', () => {
-      if(!highlighter) return;
-      
-      highlighter.highlight('select', true);
-      const selection = highlighter.selection.select;
-      
-      // Check if selection map is empty
-      if(Object.keys(selection).length > 0) {
-        const meshID = Object.keys(selection)[0];
-        // selection[meshID] is a Set of ExpressIDs
-        const expressID = Array.from(selection[meshID])[0];
-        showProperties(model, expressID);
-      } else {
-        document.getElementById('selection-panel').classList.add('hidden');
-      }
-    });
-  }
-
-  async function showProperties(model, expressID) {
-    // Fallback: Try different ways to access properties depending on library version
-    let props = null;
-    
-    if (model.properties && model.properties[expressID]) {
-      props = model.properties[expressID];
-    } else if (model.getProperties) {
-      props = await model.getProperties(expressID);
-    }
-    
-    const panel = document.getElementById('selection-panel');
-    const content = document.getElementById('props-content');
-    
-    if(!props) return;
-
-    let html = '<table class="w-full text-left border-collapse">';
-    
-    const printValue = (val) => {
-      if(val && val.value !== undefined) return val.value;
-      if(typeof val === 'object') return '[Reference]';
-      return val;
-    }
-
-    for (const [key, val] of Object.entries(props)) {
-      if(val === null || val === undefined) continue;
-      if(key === 'OwnerHistory' || key === 'ObjectPlacement' || key === 'Representation') continue;
-      if(key === 'expressID' || key === 'type') continue;
-
-      html += `
-        <tr class="border-b border-gray-100">
-          <td class="py-1 font-semibold text-gray-500 pr-2">${key}</td>
-          <td class="py-1 text-gray-800 break-all text-right">${printValue(val)}</td>
-        </tr>
-      `;
-    }
-    html += '</table>';
-
-    content.innerHTML = html;
-    panel.classList.remove('hidden');
-  }
-
-  // --- 4. Excel Logic ---
-
-  async function generateExcel(model) {
-    // Robust property access
-    let allProps = {};
-    
-    // 1. Try generic properties map (standard in fragments)
-    if (model.properties) {
-        allProps = model.properties;
-    } 
-    // 2. Fallback to async getter if available
-    else if (model.getAllProperties) {
-        allProps = await model.getAllProperties();
-    }
-
-    const rows = [];
-    
-    for (const expressID in allProps) {
-      const prop = allProps[expressID];
-      
-      // Heuristic: If it has a GlobalId, it's likely a building element
-      if (prop.GlobalId) {
-        const row = {
-          ID: expressID,
-          Type: formatIfcType(prop.type),
-          Name: prop.Name ? prop.Name.value : '',
-          Description: prop.Description ? prop.Description.value : '',
-          GlobalId: prop.GlobalId ? prop.GlobalId.value : ''
+            const { modelID, id } = result;
+            const props = await viewer.IFC.getProperties(modelID, id, true);
+            showProps(props);
         };
-        rows.push(row);
-      }
-    }
 
-    if (rows.length === 0) {
-        alert("No properties found to export. Is the model empty?");
-        return;
-    }
+        function showProps(props) {
+            propPanel.classList.remove('hidden');
+            let html = `<div class="font-bold text-lg mb-2">${props.Name ? props.Name.value : 'Object'}</div>`;
+            
+            for(const key in props) {
+                const val = props[key];
+                if(!val || typeof val === 'function') continue;
+                if(key === 'expressID' || key === 'type') continue;
+                
+                let displayVal = val.value !== undefined ? val.value : val;
+                if(typeof displayVal === 'number') displayVal = displayVal.toFixed(2);
+                
+                html += `<div class="flex justify-between border-b border-gray-100 py-1">
+                    <span class="text-gray-500">${key}</span>
+                    <span class="font-medium text-gray-800 text-right">${displayVal}</span>
+                </div>`;
+            }
+            propContent.innerHTML = html;
+        }
 
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "IFC Data");
-    XLSX.writeFile(workbook, "IFC_Export.xlsx");
-  }
+        // --- 5. Export Logic (Category Scanner) ---
+        exportBtn.addEventListener('click', async () => {
+            if(currentModelID === null) return;
+            setStatus("Generating Excel...", 'loading');
+            
+            // List of common IFC Categories to export
+            // This is safer than dumping the whole DB because it uses the index
+            const categories = [
+                WebIFC.IFCWALL, WebIFC.IFCWALLSTANDARDCASE,
+                WebIFC.IFCSLAB, WebIFC.IFCROOF,
+                WebIFC.IFCWINDOW, WebIFC.IFCDOOR,
+                WebIFC.IFCCOLUMN, WebIFC.IFCBEAM,
+                WebIFC.IFCFURNISHINGELEMENT, WebIFC.IFCMEMBER,
+                WebIFC.IFCPLATE, WebIFC.IFCSTAIR, WebIFC.IFCRAILING
+            ];
 
-  function formatIfcType(typeCode) {
-    // Map of common IFC Type Integers to Names could go here
-    // For now, we return the raw code or a generic placeholder if unavailable
-    return typeCode || 'Element';
-  }
+            const manager = viewer.IFC.loader.ifcManager;
+            let exportData = [];
 
-  // Handle Resize
-  window.addEventListener('resize', () => {
-    if(world && world.renderer) world.renderer.resize();
-    if(world && world.camera) world.camera.updateAspect();
-  });
+            try {
+                for (const category of categories) {
+                    // Get all element IDs of this category
+                    const elements = await manager.getAllItemsOfType(currentModelID, category, true);
+                    
+                    for (const el of elements) {
+                        exportData.push({
+                            'ID': el.expressID,
+                            'Type': el.constructor.name.replace('Ifc',''),
+                            'Name': el.Name ? el.Name.value : '-',
+                            'GlobalID': el.GlobalId ? el.GlobalId.value : '-',
+                            'Description': el.Description ? el.Description.value : '-'
+                        });
+                    }
+                }
 
-</script>
+                if(exportData.length === 0) throw new Error("No building elements found");
+
+                const ws = XLSX.utils.json_to_sheet(exportData);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "Model Data");
+                XLSX.writeFile(wb, "IFC_Export.xlsx");
+                
+                setStatus(`Exported ${exportData.length} items`, 'success');
+
+            } catch(e) {
+                console.error(e);
+                setStatus("Export failed", 'error');
+            }
+        });
+
+    </script>
 </body>
 </html>

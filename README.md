@@ -3,6 +3,8 @@ IFC Viewer & Excel Exporter
 
 A lightweight, browser-based BIM viewer that loads .ifc files locally and exports building data to Excel. Built with web-ifc-viewer and SheetJS, it runs entirely in the browser with no backend required.
 
+![image](https://github.com/davras5/ifc-viewer/blob/main/Preview.JPG)
+
 Features
 --------
 

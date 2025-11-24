@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Simple IFC Viewer & Excel Export</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    body { margin: 0; overflow: hidden; font-family: sans-serif; }
+    #viewer-container { width: 100vw; height: 100vh; position: relative; background-color: #f0f0f0; }
+    
+    /* Overlay UI */
+    .overlay {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 10;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 1.5rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+      max-width: 300px;
+      backdrop-filter: blur(4px);
+    }
+
+    /* Loading Spinner */
+    .loader {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #3b82f6;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    /* Custom Scrollbar for property view */
+    .props-scroll::-webkit-scrollbar { width: 6px; }
+    .props-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+    .props-scroll::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+  </style>
+
+  <!-- Import Map to handle dependencies cleanly without a bundler -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "web-ifc": "https://unpkg.com/web-ifc@0.0.53/web-ifc-api.js",
+        "@thatopen/components": "https://unpkg.com/@thatopen/components@2.3.0/dist/components.js",
+        "@thatopen/components-front": "https://unpkg.com/@thatopen/components-front@2.3.0/dist/components-front.js",
+        "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs"
+      }
+    }
+  </script>
+</head>
+<body>
+
+<div id="viewer-container"></div>
+
+<div class="overlay">
+  <h1 class="text-xl font-bold mb-2 text-gray-800"><i class="fa-solid fa-cube mr-2"></i>IFC Viewer</h1>
+  <p class="text-sm text-gray-600 mb-4">Load an IFC file to view 3D elements and export data to Excel.</p>
+  
+  <div class="space-y-3">
+    <!-- File Input -->
+    <div class="relative">
+      <input type="file" id="file-input" accept=".ifc" class="hidden" />
+      <button onclick="document.getElementById('file-input').click()" 
+              class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded transition flex items-center justify-center gap-2">
+        <i class="fa-solid fa-folder-open"></i> Load IFC File
+      </button>
+    </div>
+
+    <!-- Export Button (Hidden initially) -->
+    <button id="export-btn" disabled 
+            class="w-full bg-green-600 hover:bg-green-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white font-medium py-2 px-4 rounded transition flex items-center justify-center gap-2">
+      <i class="fa-solid fa-file-excel"></i> Export to Excel
+    </button>
+  </div>
+
+  <div id="status-msg" class="mt-4 text-sm text-gray-600 font-mono hidden">
+    <div class="loader"></div> Processing...
+  </div>
+</div>
+
+<!-- Selection Info Panel (Bottom Left) -->
+<div id="selection-panel" class="absolute bottom-5 left-5 z-10 bg-white/90 p-4 rounded-xl shadow-lg max-w-sm hidden backdrop-blur-sm max-h-96 flex flex-col">
+  <div class="flex justify-between items-center mb-2 border-b pb-2">
+    <h3 class="font-bold text-gray-800">Selected Element</h3>
+    <button onclick="document.getElementById('selection-panel').classList.add('hidden')" class="text-gray-500 hover:text-gray-800">
+      <i class="fa-solid fa-times"></i>
+    </button>
+  </div>
+  <div id="props-content" class="text-xs text-gray-700 overflow-y-auto props-scroll">
+    <!-- Properties injected here -->
+  </div>
+</div>
+
+<script type="module">
+  import * as THREE from 'three';
+  import * as OBC from '@thatopen/components';
+  import * as XLSX from 'xlsx';
+
+  // --- 1. Viewer Setup ---
+  const container = document.getElementById('viewer-container');
+  const components = new OBC.Components();
+  const worlds = components.get(OBC.Worlds);
+
+  // Create a standard world with standard lighting and camera
+  const world = worlds.create();
+  world.scene = new OBC.SimpleScene(components);
+  world.renderer = new OBC.SimpleRenderer(components, container);
+  world.camera = new OBC.SimpleCamera(components);
+
+  components.init();
+
+  // Set up the grid and background
+  world.scene.setup(); 
+  world.scene.three.background = new THREE.Color('#e0e0e0');
+
+  // --- 2. IFC Loader Configuration ---
+  const ifcLoader = components.get(OBC.IfcLoader);
+
+  // CRITICAL: Point to the WASM files on a CDN so we don't need local files
+  await ifcLoader.setup({
+    wasm: {
+      path: "https://unpkg.com/web-ifc@0.0.53/", 
+      absolute: true
+    }
+  });
+
+  // Enable Highlighter for selection
+  const highlighter = components.get(OBC.Highlighter);
+  highlighter.setup({ world });
+  highlighter.zoomToSelection = true;
+
+  // --- 3. Interaction Logic ---
+  
+  let currentModel = null;
+
+  // Handle File Input
+  const fileInput = document.getElementById('file-input');
+  const statusMsg = document.getElementById('status-msg');
+  const exportBtn = document.getElementById('export-btn');
+
+  fileInput.addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // UI Updates
+    statusMsg.classList.remove('hidden');
+    statusMsg.innerHTML = '<div class="loader"></div> Loading Model...';
+    exportBtn.disabled = true;
+
+    // Clean up previous model if exists
+    if (currentModel) {
+      world.scene.three.remove(currentModel);
+      currentModel = null;
+    }
+
+    const buffer = await file.arrayBuffer();
+    const data = new Uint8Array(buffer);
+    
+    try {
+      // Load the model
+      const model = await ifcLoader.load(data);
+      currentModel = model;
+      world.scene.three.add(model);
+      
+      statusMsg.innerHTML = `<i class="fa-solid fa-check text-green-500"></i> Loaded: ${file.name}`;
+      exportBtn.disabled = false;
+      
+      // Setup events for selection
+      setupSelection(model);
+      
+    } catch (error) {
+      console.error(error);
+      statusMsg.innerHTML = `<i class="fa-solid fa-triangle-exclamation text-red-500"></i> Error loading file.`;
+    }
+  });
+
+  // --- 4. Excel Export Logic ---
+  
+  exportBtn.addEventListener('click', async () => {
+    if (!currentModel) return;
+
+    statusMsg.classList.remove('hidden');
+    statusMsg.innerHTML = '<div class="loader"></div> Generating Excel...';
+
+    // Wait a tick to let UI update
+    setTimeout(async () => {
+      try {
+        await generateExcel(currentModel);
+        statusMsg.innerHTML = `<i class="fa-solid fa-check text-green-500"></i> Excel Exported!`;
+      } catch (e) {
+        console.error(e);
+        statusMsg.innerHTML = 'Error exporting.';
+      }
+    }, 100);
+  });
+
+  async function generateExcel(model) {
+    // 1. Get all properties from the model
+    // Note: modern Web-IFC components store properties in the model's property map or fragment map
+    // We will use the raw web-ifc API via the loader to ensure we get everything.
+    
+    // For simple viewer export, we iterate all entries in the model.properties
+    // IfcLoader (OBC) usually parses properties into a map structure.
+    
+    const properties = await model.getAllProperties();
+    
+    const rows = [];
+
+    // 2. Flatten data
+    // We want a robust list. Let's filter for relevant IFC entities (Products)
+    // to avoid clogging the excel with geometry definitions or points.
+    
+    for (const expressID in properties) {
+      const prop = properties[expressID];
+      
+      // Basic filter: Only export things that have a Name or GlobalId (Entities)
+      // and skip abstract geometry definitions if possible. 
+      // Checking for 'GlobalId' is a good heuristic for Root elements (Walls, Windows, etc).
+      if (prop.GlobalId) {
+        
+        // Flatten the object for Excel
+        const row = {
+          ExpressID: expressID,
+          Type: prop.type ? formatIfcType(prop.type) : 'Unknown',
+          Name: prop.Name ? prop.Name.value : '',
+          Description: prop.Description ? prop.Description.value : '',
+          GlobalId: prop.GlobalId ? prop.GlobalId.value : '',
+        };
+
+        // Add Property Sets if available (Requires deeper traversal usually, 
+        // but simple attribute export is often what people want first)
+        // Note: Full Pset extraction is complex in browser main thread for large files.
+        // We stick to base attributes for stability in this "Simple" demo.
+        
+        rows.push(row);
+      }
+    }
+
+    // 3. Create Workbook
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "IFC Data");
+
+    // 4. Download
+    XLSX.writeFile(workbook, "IFC_Export.xlsx");
+  }
+
+  function formatIfcType(typeCode) {
+    // web-ifc returns numeric types, we might want to map them or just return the raw code 
+    // if mapping is too heavy. The 'constructor.name' often gives the class string.
+    return typeCode; 
+  }
+
+  // --- 5. Selection Logic (Click to view attributes) ---
+
+  function setupSelection(model) {
+    container.addEventListener('click', () => {
+      highlighter.highlight('select', true);
+      const selection = highlighter.selection.select;
+      
+      // If something is selected in our model
+      if(Object.keys(selection).length > 0) {
+        const meshID = Object.keys(selection)[0];
+        const expressID = Array.from(selection[meshID])[0];
+        
+        showProperties(model, expressID);
+      } else {
+        document.getElementById('selection-panel').classList.add('hidden');
+      }
+    });
+  }
+
+  async function showProperties(model, expressID) {
+    const props = await model.getProperties(expressID);
+    const panel = document.getElementById('selection-panel');
+    const content = document.getElementById('props-content');
+    
+    if(!props) return;
+
+    let html = '<table class="w-full text-left border-collapse">';
+    
+    // Helper to print value safely
+    const printValue = (val) => {
+      if(val && val.value) return val.value;
+      if(typeof val === 'object') return 'Reference/Complex';
+      return val;
+    }
+
+    for (const [key, val] of Object.entries(props)) {
+      if(val === null || val === undefined) continue;
+      // Skip heavy geometry pointers
+      if(key === 'OwnerHistory' || key === 'ObjectPlacement' || key === 'Representation') continue;
+
+      html += `
+        <tr class="border-b border-gray-100">
+          <td class="py-1 font-semibold text-gray-500 pr-2">${key}</td>
+          <td class="py-1 text-gray-800 break-all">${printValue(val)}</td>
+        </tr>
+      `;
+    }
+    html += '</table>';
+
+    content.innerHTML = html;
+    panel.classList.remove('hidden');
+  }
+
+  // Handle window resize
+  window.addEventListener('resize', () => {
+    world.renderer.resize();
+    world.camera.updateAspect();
+  });
+
+</script>
+</body>
+</html>

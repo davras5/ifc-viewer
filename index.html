@@ -283,65 +283,88 @@
             propContent.innerHTML = html;
         }
 
-        // --- 7. Excel Export Logic ---
+        // --- 7. Advanced Excel Export Logic (Multi-Sheet + Properties) ---
         exportBtn.addEventListener('click', async () => {
             if(!ifcModel) return;
-            setStatus("Scanning model categories...", 'loading');
+            setStatus("Starting Detailed Export...", 'loading');
             
-            // Expanded Categories list per user request
             const categories = [
-                // Spatial & Context
-                WebIFC.IFCPROJECT, 
-                WebIFC.IFCSITE, 
-                WebIFC.IFCBUILDING, 
-                WebIFC.IFCBUILDINGSTOREY, // Levels
-                WebIFC.IFCSPACE, // Rooms
-
-                // Architecture
-                WebIFC.IFCWALL, 
-                WebIFC.IFCWALLSTANDARDCASE, 
-                WebIFC.IFCSLAB, 
-                WebIFC.IFCROOF, 
-                WebIFC.IFCWINDOW, 
-                WebIFC.IFCDOOR, 
-                WebIFC.IFCCOLUMN, 
-                WebIFC.IFCBEAM, 
-                WebIFC.IFCSTAIR, 
-                WebIFC.IFCRAILING, 
-                WebIFC.IFCMEMBER,
-                WebIFC.IFCCOVERING,
-
-                // Furniture & MEP
-                WebIFC.IFCFURNISHINGELEMENT,
-                WebIFC.IFCFLOWTERMINAL,
+                WebIFC.IFCPROJECT, WebIFC.IFCSITE, WebIFC.IFCBUILDING, WebIFC.IFCBUILDINGSTOREY, WebIFC.IFCSPACE,
+                WebIFC.IFCWALL, WebIFC.IFCWALLSTANDARDCASE, WebIFC.IFCSLAB, WebIFC.IFCROOF, WebIFC.IFCWINDOW, 
+                WebIFC.IFCDOOR, WebIFC.IFCCOLUMN, WebIFC.IFCBEAM, WebIFC.IFCSTAIR, WebIFC.IFCRAILING, 
+                WebIFC.IFCMEMBER, WebIFC.IFCCOVERING, WebIFC.IFCFURNISHINGELEMENT, WebIFC.IFCFLOWTERMINAL, 
                 WebIFC.IFCFLOWSEGMENT
             ];
 
-            let exportData = [];
+            const wb = XLSX.utils.book_new();
+            let totalSheets = 0;
 
             try {
                 for (const category of categories) {
+                    // 1. Get Elements
                     const elements = await ifcLoader.ifcManager.getAllItemsOfType(ifcModel.modelID, category, true);
                     
+                    if (elements.length === 0) continue;
+
+                    // 2. Determine Sheet Name (Remove 'Ifc' prefix)
+                    const categoryName = elements[0].constructor.name.replace('Ifc', '');
+                    setStatus(`Processing ${categoryName} (${elements.length} items)...`, 'loading');
+
+                    let sheetData = [];
+
+                    // 3. Loop through elements and fetch PROPERTIES
                     for (const el of elements) {
-                        exportData.push({
+                        let row = {
                             'ID': el.expressID,
-                            'Category': el.constructor.name.replace('Ifc',''),
-                            'Name': el.Name ? el.Name.value : '',
                             'GlobalID': el.GlobalId ? el.GlobalId.value : '',
+                            'Name': el.Name ? el.Name.value : '',
                             'Description': el.Description ? el.Description.value : ''
-                        });
+                        };
+
+                        try {
+                            // FETCH PROPERTY SETS (Heavy Operation)
+                            const psets = await ifcLoader.ifcManager.getPropertySets(ifcModel.modelID, el.expressID, true);
+                            
+                            for (const pset of psets) {
+                                // We are looking for IfcPropertySet (contains lists of values)
+                                if (pset.HasProperties) {
+                                    for (const prop of pset.HasProperties) {
+                                        // Ensure it has a Name and a Value
+                                        if (prop.Name && prop.Name.value && prop.NominalValue) {
+                                            const psetName = pset.Name && pset.Name.value ? pset.Name.value : 'Unknown';
+                                            const propName = prop.Name.value;
+                                            
+                                            // Handle various value types
+                                            let propVal = prop.NominalValue.value;
+                                            if (typeof propVal === 'number') propVal = parseFloat(propVal.toFixed(3)); // Round numbers
+                                            
+                                            // Format: "Pset_WallCommon.FireRating"
+                                            row[`${psetName}.${propName}`] = propVal;
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (err) {
+                            // Fail silently for individual property errors to keep export alive
+                            console.warn(`Error fetching props for ${el.expressID}`, err);
+                        }
+
+                        sheetData.push(row);
                     }
+
+                    // 4. Create Worksheet & Append to Workbook
+                    const ws = XLSX.utils.json_to_sheet(sheetData);
+                    // Excel sheet names are limited to 31 chars
+                    const safeSheetName = categoryName.substring(0, 31);
+                    XLSX.utils.book_append_sheet(wb, ws, safeSheetName);
+                    totalSheets++;
                 }
 
-                if(exportData.length === 0) throw new Error("No elements found in selected categories.");
+                if(totalSheets === 0) throw new Error("No architectural data found to export.");
 
-                const ws = XLSX.utils.json_to_sheet(exportData);
-                const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, "IFC Data");
-                XLSX.writeFile(wb, "IFC_Export_Full.xlsx");
-                
-                setStatus(`Success! Exported ${exportData.length} items.`, 'success');
+                // 5. Download
+                XLSX.writeFile(wb, "IFC_Export_MultiSheet.xlsx");
+                setStatus(`Success! Created ${totalSheets} sheets with property data.`, 'success');
 
             } catch(e) {
                 console.error(e);

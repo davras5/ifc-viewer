@@ -35,6 +35,12 @@
             box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
         }
         
+        .glass-footer {
+            background: rgba(30, 30, 30, 0.8);
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
         .loader { border: 2px solid #f3f3f3; border-top: 2px solid #3b82f6; border-radius: 50%; width: 12px; height: 12px; animation: spin 1s linear infinite; display: inline-block; margin-right: 8px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
@@ -43,6 +49,7 @@
 
     <div id="viewer-container"></div>
 
+    <!-- Main Controls -->
     <div class="absolute top-5 left-5 w-72 glass-panel rounded-xl p-4 flex flex-col gap-4 z-10">
         <div class="flex items-center gap-3 border-b border-gray-200 pb-3">
             <i class="fa-solid fa-cube text-2xl text-blue-600"></i>
@@ -67,12 +74,22 @@
         <div id="status" class="hidden text-xs bg-blue-50 text-blue-700 p-2 rounded border border-blue-100"></div>
     </div>
 
+    <!-- Properties Panel -->
     <div id="prop-panel" class="absolute top-5 right-5 w-80 glass-panel rounded-xl hidden flex-col max-h-[80vh] z-10">
         <div class="p-3 bg-gray-50 border-b flex justify-between items-center rounded-t-xl">
             <span class="font-bold text-xs uppercase text-gray-600">Properties</span>
             <button onclick="document.getElementById('prop-panel').classList.add('hidden')" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
         </div>
         <div id="prop-content" class="p-3 overflow-y-auto text-xs space-y-2"></div>
+    </div>
+
+    <!-- Footer -->
+    <div class="absolute bottom-4 right-4 z-10">
+        <a href="https://github.com/davras5/ifc-viewer/" target="_blank" 
+           class="glass-footer px-3 py-2 rounded-full text-xs text-gray-300 hover:text-white hover:bg-gray-800 transition flex items-center gap-2 no-underline">
+            <i class="fa-brands fa-github text-lg"></i>
+            <span>davras5/ifc-viewer</span>
+        </a>
     </div>
 
     <script type="module">
@@ -271,11 +288,33 @@
             if(!ifcModel) return;
             setStatus("Scanning model categories...", 'loading');
             
+            // Expanded Categories list per user request
             const categories = [
-                WebIFC.IFCWALL, WebIFC.IFCWALLSTANDARDCASE, WebIFC.IFCSLAB, 
-                WebIFC.IFCROOF, WebIFC.IFCWINDOW, WebIFC.IFCDOOR, 
-                WebIFC.IFCCOLUMN, WebIFC.IFCBEAM, WebIFC.IFCFURNISHINGELEMENT, 
-                WebIFC.IFCPLATE, WebIFC.IFCSTAIR, WebIFC.IFCRAILING, WebIFC.IFCMEMBER
+                // Spatial & Context
+                WebIFC.IFCPROJECT, 
+                WebIFC.IFCSITE, 
+                WebIFC.IFCBUILDING, 
+                WebIFC.IFCBUILDINGSTOREY, // Levels
+                WebIFC.IFCSPACE, // Rooms
+
+                // Architecture
+                WebIFC.IFCWALL, 
+                WebIFC.IFCWALLSTANDARDCASE, 
+                WebIFC.IFCSLAB, 
+                WebIFC.IFCROOF, 
+                WebIFC.IFCWINDOW, 
+                WebIFC.IFCDOOR, 
+                WebIFC.IFCCOLUMN, 
+                WebIFC.IFCBEAM, 
+                WebIFC.IFCSTAIR, 
+                WebIFC.IFCRAILING, 
+                WebIFC.IFCMEMBER,
+                WebIFC.IFCCOVERING,
+
+                // Furniture & MEP
+                WebIFC.IFCFURNISHINGELEMENT,
+                WebIFC.IFCFLOWTERMINAL,
+                WebIFC.IFCFLOWSEGMENT
             ];
 
             let exportData = [];
@@ -295,12 +334,12 @@
                     }
                 }
 
-                if(exportData.length === 0) throw new Error("No architectural elements found to export.");
+                if(exportData.length === 0) throw new Error("No elements found in selected categories.");
 
                 const ws = XLSX.utils.json_to_sheet(exportData);
                 const wb = XLSX.utils.book_new();
                 XLSX.utils.book_append_sheet(wb, ws, "IFC Data");
-                XLSX.writeFile(wb, "IFC_Export.xlsx");
+                XLSX.writeFile(wb, "IFC_Export_Full.xlsx");
                 
                 setStatus(`Success! Exported ${exportData.length} items.`, 'success');
 

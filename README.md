@@ -51,4 +51,4 @@ npx serve
 
 ## License
 
-Licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+Licensed under [MIT](https://opensource.org/licenses/MIT)

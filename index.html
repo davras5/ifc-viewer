@@ -53,15 +53,15 @@
                 </div>
 
                 <!-- Toggle bar (top center) -->
-                <div id="toggle-bar" class="toggle-bar glass-panel">
-                    <button id="tb-controls" class="tb-btn active" title="Controls">
-                        <i class="fa-solid fa-wrench"></i>
+                <div id="toggle-bar" class="toggle-bar glass-panel" role="toolbar" aria-label="Panel toggles">
+                    <button id="tb-controls" class="tb-btn active" title="Controls" aria-label="Toggle controls panel">
+                        <i class="fa-solid fa-wrench" aria-hidden="true"></i>
                     </button>
-                    <button id="tb-table" class="tb-btn" title="Table">
-                        <i class="fa-solid fa-table"></i>
+                    <button id="tb-table" class="tb-btn" title="Table" aria-label="Toggle data table">
+                        <i class="fa-solid fa-table" aria-hidden="true"></i>
                     </button>
-                    <button id="tb-dashboard" class="tb-btn" title="Dashboard">
-                        <i class="fa-solid fa-chart-pie"></i>
+                    <button id="tb-dashboard" class="tb-btn" title="Dashboard" aria-label="Toggle dashboard">
+                        <i class="fa-solid fa-chart-pie" aria-hidden="true"></i>
                     </button>
                 </div>
 
@@ -73,7 +73,7 @@
                             <h1 class="font-bold text-gray-800 text-lg">IFC Viewer</h1>
                             <p class="text-xs text-gray-500">Engine: web-ifc 0.0.66</p>
                         </div>
-                        <button id="controls-close" title="Close panel"><i class="fa-solid fa-times"></i></button>
+                        <button id="controls-close" title="Close panel" aria-label="Close controls"><i class="fa-solid fa-times" aria-hidden="true"></i></button>
                     </div>
 
                     <input type="file" id="file-input" accept=".ifc" class="hidden" />
@@ -95,14 +95,14 @@
                         <i class="fa-solid fa-file-excel mr-2"></i> Export Excel
                     </button>
 
-                    <div id="status" class="hidden text-xs bg-blue-50 text-blue-700 p-2 rounded border border-blue-100 leading-relaxed break-words"></div>
+                    <div id="status" class="hidden text-xs bg-blue-50 text-blue-700 p-2 rounded border border-blue-100 leading-relaxed break-words" role="status" aria-live="polite"></div>
                 </div>
 
                 <!-- Properties Panel -->
                 <div id="prop-panel" class="absolute top-5 right-5 w-80 glass-panel rounded-xl hidden flex-col max-h-[80vh] z-10">
                     <div class="p-3 bg-gray-50 border-b flex justify-between items-center rounded-t-xl">
                         <span class="font-bold text-xs uppercase text-gray-600">Properties</span>
-                        <button onclick="closePropPanel()" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
+                        <button onclick="closePropPanel()" class="text-gray-400 hover:text-red-500" aria-label="Close properties"><i class="fa-solid fa-times" aria-hidden="true"></i></button>
                     </div>
                     <div id="prop-content" class="p-3 overflow-y-auto text-xs space-y-2"></div>
                 </div>
@@ -134,7 +134,7 @@
             <div id="dashboard-panel" class="dashboard-panel">
                 <div class="dashboard-header">
                     <span class="dashboard-title"><i class="fa-solid fa-chart-pie"></i> Dashboard</span>
-                    <button id="dashboard-close" class="dashboard-close" title="Close dashboard"><i class="fa-solid fa-times"></i></button>
+                    <button id="dashboard-close" class="dashboard-close" title="Close dashboard" aria-label="Close dashboard"><i class="fa-solid fa-times" aria-hidden="true"></i></button>
                 </div>
                 <div id="color-legend" class="color-legend"></div>
                 <div id="gs-grid" class="grid-stack"></div>

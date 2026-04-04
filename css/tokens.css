@@ -1,35 +1,79 @@
 /* Design tokens */
 :root {
+    /* Viewer */
     --color-bg: #222;
+
+    /* Glass panels */
     --color-glass-bg: rgba(255, 255, 255, 0.95);
     --color-glass-border: rgba(255, 255, 255, 0.2);
     --color-glass-shadow: rgba(31, 38, 135, 0.37);
     --color-footer-bg: rgba(30, 30, 30, 0.8);
     --color-footer-border: rgba(255, 255, 255, 0.1);
+
+    /* Accent & interaction */
+    --color-accent: #3b82f6;
+    --color-accent-hover: #2563eb;
+    --color-accent-light: #dbeafe;
+    --color-accent-light-text: #1e40af;
+    --color-accent-light-border: #bfdbfe;
+    --color-danger: #ef4444;
+    --color-danger-hover: #dc2626;
+    --color-white: #ffffff;
+
+    /* Text */
+    --color-text: #1f2937;
+    --color-text-muted: #6b7280;
+    --color-text-disabled: #9ca3af;
+
+    /* Borders & surfaces */
+    --color-border: #e5e7eb;
+    --color-surface: #ffffff;
+    --color-surface-hover: #f3f4f6;
+    --color-surface-active: #dbeafe;
+    --color-surface-header: #f9fafb;
+
+    /* Loader */
     --color-loader-track: #f3f3f3;
-    --color-loader-spin: #3b82f6;
+    --color-loader-spin: var(--color-accent);
     --loader-size: 12px;
 
+    /* Spacing scale (4px base) */
+    --sp-1: 4px;
+    --sp-2: 8px;
+    --sp-3: 12px;
+    --sp-4: 16px;
+    --sp-5: 20px;
+    --sp-6: 24px;
+
+    /* Border radius */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-pill: 999px;
+
+    /* Focus ring */
+    --focus-ring: 0 0 0 2px rgba(59, 130, 246, 0.4);
+
     /* Table panel */
-    --tbl-bg: #fff;
-    --tbl-border: #e5e7eb;
-    --tbl-header-bg: #f9fafb;
-    --tbl-row-hover: #f3f4f6;
-    --tbl-row-active: #dbeafe;
-    --tbl-accent: #3b82f6;
-    --tbl-text: #1f2937;
-    --tbl-text-muted: #6b7280;
+    --tbl-bg: var(--color-surface);
+    --tbl-border: var(--color-border);
+    --tbl-header-bg: var(--color-surface-header);
+    --tbl-row-hover: var(--color-surface-hover);
+    --tbl-row-active: var(--color-surface-active);
+    --tbl-accent: var(--color-accent);
+    --tbl-text: var(--color-text);
+    --tbl-text-muted: var(--color-text-muted);
     --tbl-height: 40vh;
 
     /* Right panel / Dashboard */
-    --right-panel-width: 300px;
-    --right-panel-bg: #ffffff;
-    --right-panel-border: #e5e7eb;
-    --dash-widget-border: #e5e7eb;
-    --dash-widget-radius: 8px;
+    --right-panel-width: 25vw;
+    --right-panel-bg: var(--color-surface);
+    --right-panel-border: var(--color-border);
+    --dash-widget-border: var(--color-border);
+    --dash-widget-radius: var(--radius-md);
     --dash-widget-shadow: 0 1px 3px rgba(0,0,0,.08);
 
     /* Toggle bar */
-    --toggle-bar-active: #3b82f6;
-    --toggle-bar-inactive: #6b7280;
+    --toggle-bar-active: var(--color-accent);
+    --toggle-bar-inactive: var(--color-text-muted);
 }

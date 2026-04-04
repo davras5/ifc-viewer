@@ -1,6 +1,13 @@
 /**
- * Color palette utilities for the "Color by Column" feature.
+ * Shared utilities: HTML escaping, color palette generation, color conversion.
  */
+
+/** Escape a string for safe HTML insertion. */
+export function esc(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
 
 /**
  * Generate N visually distinct colors using evenly-spaced HSL hues.

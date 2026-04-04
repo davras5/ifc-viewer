@@ -2,7 +2,22 @@ body {
     margin: 0;
     overflow: hidden;
     background: var(--color-bg);
-    font-family: sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Global focus ring for keyboard navigation */
+:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* Smooth transitions on all interactive elements */
+button, select, input, a {
+    transition: all .15s ease;
+}
+button:disabled {
+    cursor: not-allowed;
+    opacity: .5;
 }
 
 /* ── Layout ── */
@@ -55,6 +70,7 @@ body {
 }
 #right-panel.open {
     width: var(--right-panel-width);
+    min-width: 280px;
 }
 
 /* Resize handle (left edge of right panel) */
@@ -74,7 +90,7 @@ body {
     width: 3px;
     height: 30px;
     border-radius: 2px;
-    background: #ddd;
+    background: var(--color-border);
 }
 .rp-resize-handle:hover::after,
 .rp-resize-handle.dragging::after {
@@ -113,11 +129,16 @@ body {
     background: none;
     border: none;
     cursor: pointer;
-    color: #9ca3af;
+    color: var(--color-text-disabled);
     font-size: 14px;
-    padding: 2px;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
 }
-.dashboard-close:hover { color: #ef4444; }
+.dashboard-close:hover { color: var(--color-danger); background: rgba(239,68,68,.08); }
 
 /* Gridstack overrides — 2-column width rules */
 #gs-grid.gs-2 > .grid-stack-item[gs-w="2"] { width: 100%; }
@@ -153,16 +174,23 @@ body {
     align-items: center;
 }
 .gs-widget-remove,
-.gs-widget-color {
+.gs-widget-color,
+.gs-widget-edit {
     background: none;
     border: none;
     cursor: pointer;
-    color: var(--tbl-text-muted);
+    color: var(--color-text-disabled);
     font-size: 11px;
-    padding: 2px;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
 }
-.gs-widget-remove:hover { color: #ef4444; }
-.gs-widget-color:hover { color: var(--tbl-accent); }
+.gs-widget-remove:hover { color: var(--color-danger); background: rgba(239,68,68,.08); }
+.gs-widget-color:hover { color: var(--color-accent); background: rgba(59,130,246,.08); }
+.gs-widget-edit:hover { color: var(--color-text); background: var(--color-surface-hover); }
 .gs-widget-body {
     flex: 1;
     min-height: 0;
@@ -220,7 +248,7 @@ body {
     backdrop-filter: blur(2px);
 }
 .add-widget-dialog {
-    background: #fff;
+    background: var(--color-surface);
     border: 1px solid var(--tbl-border);
     border-radius: 10px;
     box-shadow: 0 8px 32px rgba(0,0,0,.18);
@@ -267,13 +295,46 @@ body {
     transition: all .15s;
 }
 .add-widget-dialog-actions .aw-add {
-    background: var(--tbl-accent);
-    color: #fff;
-    border-color: var(--tbl-accent);
+    background: var(--color-accent);
+    color: var(--color-white);
+    border-color: var(--color-accent);
+}
+.add-widget-dialog-actions .aw-add:hover {
+    background: var(--color-accent-hover);
 }
 .add-widget-dialog-actions .aw-cancel {
-    background: #fff;
-    color: var(--tbl-text-muted);
+    background: var(--color-surface);
+    color: var(--color-text-muted);
+}
+.add-widget-dialog-actions .aw-cancel:hover {
+    background: var(--color-surface-hover);
+}
+
+/* Preview in add-widget modal */
+.aw-preview {
+    padding: var(--sp-2) var(--sp-3);
+    background: var(--color-surface-header);
+    border-radius: var(--radius-sm);
+    text-align: center;
+    min-height: 20px;
+}
+.aw-preview:empty { display: none; }
+.aw-preview-num {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--color-text);
+}
+.aw-preview-label {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-left: var(--sp-1);
+}
+
+/* Disabled select in edit mode */
+.add-widget-dialog select:disabled {
+    background: var(--color-surface-header);
+    color: var(--color-text-muted);
+    cursor: not-allowed;
 }
 
 /* Legend inside dashboard panel — match widget card styling */
@@ -295,37 +356,36 @@ body {
 
 .toggle-bar {
     position: absolute;
-    top: 12px;
+    top: var(--sp-3);
     left: 50%;
     transform: translateX(-50%);
     z-index: 20;
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 4px;
-    border-radius: 999px;
+    gap: var(--sp-1);
+    padding: var(--sp-1);
+    border-radius: var(--radius-lg);
 }
 .tb-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-md);
     border: none;
     background: transparent;
     color: var(--toggle-bar-inactive);
     cursor: pointer;
-    font-size: 13px;
-    transition: all .15s;
+    font-size: 14px;
 }
 .tb-btn:hover {
     background: rgba(0,0,0,.06);
-    color: var(--tbl-text);
+    color: var(--color-text);
 }
 .tb-btn.active {
     background: var(--toggle-bar-active);
-    color: #fff;
+    color: var(--color-white);
 }
 .tb-btn.hidden { display: none; }
 
@@ -336,11 +396,16 @@ body {
     background: none;
     border: none;
     cursor: pointer;
-    color: #9ca3af;
+    color: var(--color-text-disabled);
     font-size: 14px;
-    padding: 2px;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
 }
-#controls-close:hover { color: #ef4444; }
+#controls-close:hover { color: var(--color-danger); background: rgba(239,68,68,.08); }
 
 /* ── Glass panels (overlays inside viewer-area) ── */
 
@@ -377,23 +442,22 @@ body {
 
 .tbl-toggle {
     position: absolute;
-    bottom: 8px;
+    bottom: var(--sp-2);
     left: 50%;
     transform: translateX(-50%);
     z-index: 20;
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 5px 18px;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-4);
     background: var(--tbl-bg);
     border: 1px solid var(--tbl-border);
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     font-size: 12px;
     font-weight: 600;
     color: var(--tbl-text);
     cursor: pointer;
     box-shadow: 0 1px 4px rgba(0,0,0,.1);
-    transition: background .15s;
 }
 .tbl-toggle:hover { background: var(--tbl-row-hover); }
 .tbl-toggle .tbl-toggle-arrow { font-size: 12px; }
@@ -465,7 +529,7 @@ body {
     font-size: 13px;
     padding: 2px;
 }
-.color-legend-clear:hover { color: #ef4444; }
+.color-legend-clear:hover { color: var(--color-danger); }
 
 .color-legend-body {
     flex: 1;
@@ -476,11 +540,14 @@ body {
 .color-legend-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 3px 0;
+    gap: var(--sp-2);
+    padding: var(--sp-1) 0;
     font-size: 11px;
-    color: var(--tbl-text);
+    color: var(--color-text);
+    border-radius: var(--radius-sm);
+    transition: background .1s;
 }
+.color-legend-item:hover { background: var(--color-surface-hover); }
 .color-legend-swatch {
     width: 12px;
     height: 12px;
@@ -512,14 +579,18 @@ body {
 /* Empty state */
 .tbl-empty-state {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
+    gap: var(--sp-2);
     height: 100%;
-    color: var(--tbl-text-muted);
-    font-size: 13px;
+    padding: var(--sp-6);
+    text-align: center;
+    color: var(--color-text-muted);
 }
-.tbl-empty-state i { font-size: 18px; opacity: .5; }
+.tbl-empty-icon { font-size: 36px; opacity: .2; }
+.tbl-empty-title { font-size: 14px; font-weight: 600; color: var(--color-text); }
+.tbl-empty-msg { font-size: 12px; max-width: 280px; line-height: 1.5; }
 
 /* ── Table panel (in document flow, below viewer) ── */
 
@@ -595,7 +666,7 @@ body {
     transition: all .15s;
 }
 .tbl-tab.active {
-    background: #fff;
+    background: var(--color-surface);
     color: var(--tbl-accent);
     border-color: var(--tbl-border);
     box-shadow: 0 1px 2px rgba(0,0,0,.06);
@@ -607,7 +678,7 @@ body {
     align-items: center;
     flex: 1;
     max-width: 280px;
-    background: #fff;
+    background: var(--color-surface);
     border: 1px solid var(--tbl-border);
     border-radius: 6px;
     padding: 0 8px;
@@ -646,7 +717,7 @@ body {
     padding: 5px 10px;
     font-size: 11px;
     font-weight: 500;
-    background: #fff;
+    background: var(--color-surface);
     border: 1px solid var(--tbl-border);
     border-radius: 6px;
     cursor: pointer;
@@ -668,16 +739,16 @@ body {
 .filter-pill {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 2px 6px 2px 8px;
-    font-size: 10px;
+    gap: var(--sp-1);
+    padding: var(--sp-1) var(--sp-2);
+    font-size: 11px;
     font-weight: 500;
-    background: #dbeafe;
-    color: #1e40af;
-    border: 1px solid #bfdbfe;
-    border-radius: 999px;
+    background: var(--color-accent-light);
+    color: var(--color-accent-light-text);
+    border: 1px solid var(--color-accent-light-border);
+    border-radius: var(--radius-sm);
     white-space: nowrap;
-    max-width: 180px;
+    max-width: 200px;
 }
 .filter-pill-label {
     overflow: hidden;
@@ -687,35 +758,35 @@ body {
     background: none;
     border: none;
     cursor: pointer;
-    color: #1e40af;
-    font-size: 9px;
-    padding: 0 1px;
+    color: var(--color-accent-light-text);
+    font-size: 10px;
+    padding: 0 2px;
     line-height: 1;
     opacity: .6;
 }
 .filter-pill-x:hover { opacity: 1; }
 .filter-pill--reset {
     background: none;
-    border: 1px solid var(--tbl-border);
-    color: var(--tbl-text-muted);
+    border: 1px solid var(--color-border);
+    color: var(--color-text-muted);
     cursor: pointer;
-    padding: 2px 8px;
-    font-size: 10px;
+    padding: var(--sp-1) var(--sp-2);
+    font-size: 11px;
     font-weight: 500;
 }
 .filter-pill--reset:hover {
-    border-color: #ef4444;
-    color: #ef4444;
+    border-color: var(--color-danger);
+    color: var(--color-danger);
 }
 
 /* Sync 3D toggle */
 .tbl-sync3d-btn.active {
-    background: var(--tbl-accent);
-    color: #fff;
-    border-color: var(--tbl-accent);
+    background: var(--color-accent);
+    color: var(--color-white);
+    border-color: var(--color-accent);
 }
 .tbl-sync3d-btn.active:hover {
-    background: #2563eb;
+    background: var(--color-accent-hover);
 }
 
 /* Dropdowns */
@@ -728,7 +799,7 @@ body {
     right: 0;
     top: calc(100% + 4px);
     min-width: 180px;
-    background: #fff;
+    background: var(--color-surface);
     border: 1px solid var(--tbl-border);
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0,0,0,.12);
@@ -753,7 +824,7 @@ body {
     padding: 2px 8px;
     border: 1px solid var(--tbl-border);
     border-radius: 4px;
-    background: #fff;
+    background: var(--color-surface);
     cursor: pointer;
     color: var(--tbl-text-muted);
 }
@@ -838,7 +909,7 @@ body {
 
 .tbl-table th .sort-icon {
     font-size: 10px;
-    color: #ccc;
+    color: var(--color-text-disabled);
     margin-left: 2px;
 }
 .tbl-table th .sort-icon.active {
@@ -858,18 +929,21 @@ body {
     background: none;
     border: none;
     cursor: pointer;
-    color: #ccc;
-    font-size: 10px;
-    padding: 2px 4px;
-    border-radius: 3px;
-    transition: all .15s;
-    margin-left: 6px;
+    color: var(--color-text-disabled);
+    font-size: 11px;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    margin-left: var(--sp-1);
 }
-.th-dd-btn:hover { color: var(--tbl-text); background: rgba(0,0,0,.05); }
-.th-dd-btn.active { color: var(--tbl-accent); }
+.th-dd-btn:hover { color: var(--color-text); background: var(--color-surface-hover); }
+.th-dd-btn.active { color: var(--color-accent); }
 .tbl-table td {
     padding: 5px 10px;
-    border-bottom: 1px solid #f0f0f0;
+    border-bottom: 1px solid var(--color-surface-hover);
     color: var(--tbl-text);
     white-space: nowrap;
     overflow: hidden;
@@ -907,7 +981,7 @@ body {
     gap: 6px;
 }
 .tbl-pg-btn {
-    background: #fff;
+    background: var(--color-surface);
     border: 1px solid var(--tbl-border);
     border-radius: 4px;
     padding: 3px 6px;
@@ -927,7 +1001,7 @@ body {
     border-radius: 4px;
     padding: 2px 4px;
     font-size: 11px;
-    background: #fff;
+    background: var(--color-surface);
     color: var(--tbl-text);
 }
 
@@ -935,7 +1009,7 @@ body {
 
 .th-dropdown {
     width: 260px;
-    background: #fff;
+    background: var(--color-surface);
     border: 1px solid var(--tbl-border);
     border-radius: 8px;
     box-shadow: 0 4px 20px rgba(0,0,0,.15);

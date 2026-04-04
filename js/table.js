@@ -4,15 +4,7 @@
  * pagination, column visibility dropdown, resize handle, export actions.
  */
 
-import { categoricalPalette, gradientPalette } from "./color-palette.js";
-
-/* ── Helpers ── */
-
-const esc = (s) => {
-  const d = document.createElement("div");
-  d.textContent = s;
-  return d.innerHTML;
-};
+import { categoricalPalette, gradientPalette, esc } from "./color-palette.js";
 
 const fmtNum = (v, decimals = 2) => {
   const n = parseFloat(v);
@@ -195,7 +187,7 @@ function updateLegend() {
   if (!colorByConfig) {
     panel.innerHTML = `
       <div class="color-legend-empty">
-        <i class="fa-solid fa-palette"></i>
+        <i class="fa-solid fa-fill-drip"></i>
         <span>No colors applied. Use the <i class="fa-solid fa-filter"></i> column filter to color by attribute.</span>
       </div>
     `;
@@ -204,11 +196,7 @@ function updateLegend() {
   }
 
   const data = colorByConfig.tab === "elements" ? elementsData : psetsData;
-  const counts = new Map();
-  for (const row of data) {
-    const v = String(row[colorByConfig.key] ?? "");
-    counts.set(v, (counts.get(v) || 0) + 1);
-  }
+  const counts = getUniqueValues(data, colorByConfig.key);
 
   const col = (colorByConfig.tab === "elements" ? ELEMENT_COLS : PSET_COLS)
     .find((c) => c.key === colorByConfig.key);
@@ -248,8 +236,9 @@ function updateLegend() {
 function renderEmptyState() {
   container.innerHTML = `
     <div class="tbl-empty-state">
-      <i class="fa-solid fa-cube"></i>
-      <span>No model loaded \u2014 open an IFC file or load the sample to see data here.</span>
+      <div class="tbl-empty-icon"><i class="fa-solid fa-cube"></i></div>
+      <div class="tbl-empty-title">No data loaded</div>
+      <div class="tbl-empty-msg">Open an IFC file or load the sample model to explore elements and properties.</div>
     </div>
   `;
 }

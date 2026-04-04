@@ -4,18 +4,13 @@ import { IFCLoader } from 'web-ifc-three';
 import * as WebIFC from 'web-ifc';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
 import { initTable, populateTable, highlightRow, toggle as toggleTable, onColorBy, onLegendChange, onFilter, resetColorBy } from './table.js';
-import { cssColorToHex } from './color-palette.js';
+import { cssColorToHex, esc } from './color-palette.js';
 import { initDashboard, refreshDashboard } from './dashboard.js';
 
-// --- HTML escape helper ---
-const esc = (s) => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
-
-// --- Setup BVH ---
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
 THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
 THREE.Mesh.prototype.raycast = acceleratedRaycast;
 
-// --- 1. Three.js Scene Setup ---
 const container = document.getElementById('viewer-container');
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x222222);
@@ -44,12 +39,10 @@ scene.add(grid);
 const axes = new THREE.AxesHelper(5);
 scene.add(axes);
 
-// --- 2. IFC Loader & Init Logic ---
 const ifcLoader = new IFCLoader();
 let ifcModel = null;
 let isEngineInitialized = false;
 
-// Selection Material (Red highlight)
 const highlightMaterial = new THREE.MeshLambertMaterial({
     color: 0xff3333,
     transparent: true,
@@ -70,7 +63,6 @@ async function initIFCEngine() {
     isEngineInitialized = true;
 }
 
-// --- 3. Animation Loop ---
 function animate() {
     requestAnimationFrame(animate);
     controls.update();
@@ -90,7 +82,6 @@ function resizeRenderer() {
 
 new ResizeObserver(resizeRenderer).observe(container);
 
-// --- IFC element categories (shared by stats + table extraction) ---
 const ELEMENT_CATEGORIES = [
     WebIFC.IFCWALL, WebIFC.IFCWALLSTANDARDCASE, WebIFC.IFCSLAB,
     WebIFC.IFCWINDOW, WebIFC.IFCDOOR, WebIFC.IFCCOLUMN, WebIFC.IFCBEAM,
@@ -99,7 +90,6 @@ const ELEMENT_CATEGORIES = [
     WebIFC.IFCFLOWTERMINAL, WebIFC.IFCFLOWSEGMENT
 ];
 
-// --- Init table ---
 const tablePanel = document.getElementById('table-panel');
 const tblToggleBtn = document.getElementById('tbl-toggle');
 
@@ -109,7 +99,6 @@ initTable(tablePanel, {
 
 tblToggleBtn.addEventListener('click', () => { toggleTable(); syncTableButton(); });
 
-// --- Toggle bar + panel visibility ---
 const controlsPanel = document.getElementById('controls-panel');
 const rightPanel = document.getElementById('right-panel');
 const tbControls = document.getElementById('tb-controls');
@@ -191,7 +180,6 @@ initDashboard();
 // Shared data for dashboard
 window.__ifcViewerData = { elements: [], psets: [] };
 
-// --- Global loading overlay ---
 const loadingOverlay = document.getElementById('loading-overlay');
 const loadingText = document.getElementById('loading-text');
 
@@ -204,7 +192,6 @@ function hideLoading() {
     loadingOverlay.classList.add('hidden');
 }
 
-// --- Color-by subsets ---
 const colorSubsets = [];
 const materialCache = new Map();
 
@@ -269,9 +256,7 @@ onColorBy(async (config) => {
     }
 });
 
-// --- 3D filter sync ---
-// Strategy: hide the original model, show a "visible" subset (original material)
-// and a "ghost" subset (transparent gray) for filtered-out elements.
+// Ghost filtered-out elements so they're visible but faded; non-ghosted elements stay interactive
 const ghostMaterial = new THREE.MeshLambertMaterial({
     color: 0xcccccc,
     transparent: true,
@@ -354,7 +339,6 @@ onFilter(async (filterData) => {
     }
 });
 
-// --- 4. UI Logic ---
 const statusDiv = document.getElementById('status');
 const exportBtn = document.getElementById('export-btn');
 const sampleBtn = document.getElementById('sample-btn');
@@ -387,7 +371,6 @@ function setStatus(msg, type='loading') {
     }
 }
 
-// --- 5. Main Loading Logic (Reusable) ---
 async function loadModel(url) {
     if(ifcModel) {
         lastColorConfig = null;
@@ -450,7 +433,6 @@ async function loadModel(url) {
     }
 }
 
-// --- Extract IFC data for table ---
 async function extractTableData(modelID) {
     const elements = [];
     const psets = [];
@@ -492,7 +474,6 @@ async function extractTableData(modelID) {
     return { elements, psets, totalCount: elements.length };
 }
 
-// --- Select element by expressID (from table row click) ---
 function selectElementById(expressID) {
     if (!ifcModel) return;
 
@@ -512,9 +493,7 @@ function selectElementById(expressID) {
     ifcLoader.ifcManager.getItemProperties(ifcModel.modelID, expressID).then(showProps);
 }
 
-// --- 5a. Event Listeners ---
 
-// Local File
 document.getElementById('file-input').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if(!file) return;
@@ -523,7 +502,6 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
     URL.revokeObjectURL(url);
 });
 
-// Sample Model
 sampleBtn.addEventListener('click', async () => {
     setStatus("Loading sample model...", 'loading');
     sampleBtn.disabled = true;
@@ -538,7 +516,6 @@ sampleBtn.addEventListener('click', async () => {
     }
 });
 
-// --- 6. Improved Selection (Single Click with Drag Detection) ---
 const raycaster = new THREE.Raycaster();
 raycaster.firstHitOnly = true;
 const mouse = new THREE.Vector2();
@@ -636,8 +613,6 @@ function showProps(props) {
     propContent.innerHTML = html;
 }
 
-// --- 7. Optimized Export Logic (Time-Sliced) ---
-// Helper to let UI breathe
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 exportBtn.addEventListener('click', async () => {
@@ -663,7 +638,7 @@ exportBtn.addEventListener('click', async () => {
             const categoryName = elements[0].constructor.name.replace('Ifc', '');
             let sheetData = [];
 
-            // --- 1. CRASH FIX: Time-Sliced Loop ---
+            // Yield every 50 items to keep UI responsive
             for (let i = 0; i < elements.length; i++) {
                 // Every 50 items, pause for 10ms to let UI update
                 if (i % 50 === 0) {

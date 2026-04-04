@@ -4,6 +4,7 @@
  */
 
 import { setFilter, applyColorByColumn } from "./table.js";
+import { categoricalPalette, esc } from "./color-palette.js";
 
 const STORAGE_KEY = "ifc-viewer-dashboard";
 
@@ -15,9 +16,8 @@ const WIDGET_TYPES = {
 };
 
 const DEFAULT_LAYOUT = [
-  { type: "donut",  config: { column: "Type", label: "Elements by Type" }, pos: { x: 0, y: 0, w: 2, h: 4 } },
-  { type: "metric", config: { filterType: "Wall", label: "Walls" },       pos: { x: 0, y: 4, w: 1, h: 1 } },
-  { type: "metric", config: { filterType: "Slab", label: "Slabs" },       pos: { x: 1, y: 4, w: 1, h: 1 } },
+  { type: "donut",  config: { column: "Type", label: "Elements by Type" },                    pos: { x: 0, y: 0, w: 2, h: 4 } },
+  { type: "metric", config: { column: "Type", filterType: "", label: "Total Elements" },      pos: { x: 0, y: 4, w: 2, h: 1 } },
 ];
 
 let grid = null;
@@ -47,22 +47,24 @@ function initGrid() {
 
   grid = GridStack.init({
     column: 2,
-    cellHeight: 70,
+    cellHeight: 90,
     margin: 6,
     float: false,
     animate: true,
     disableOneColumnMode: true,
   }, "#gs-grid");
 
-  grid.on("change", saveLayout);
   initialized = true;
 
   const saved = loadLayout();
   const layout = saved || DEFAULT_LAYOUT;
 
+  // Batch-add without saving on each widget
   for (const item of layout) {
-    addWidget(item.type, item.config, item.pos);
+    addWidget(item.type, item.config, item.pos, true);
   }
+  saveLayout();
+  grid.on("change", saveLayout);
 }
 
 export function refreshDashboard() {
@@ -74,7 +76,7 @@ export function refreshDashboard() {
 
 /* ── Widget management ── */
 
-function addWidget(type, config, pos) {
+function addWidget(type, config, pos, skipSave) {
   const id = `gs-w-${idCounter++}`;
   const typeDef = WIDGET_TYPES[type] || WIDGET_TYPES.metric;
   const gridPos = pos || { x: 0, y: 999, w: typeDef.defaultW, h: typeDef.defaultH };
@@ -82,10 +84,11 @@ function addWidget(type, config, pos) {
 
   const contentHtml = `
     <div class="gs-widget-header">
-      <span>${esc(config.label || type)}</span>
+      <span class="gs-widget-title">${esc(config.label || type)}</span>
       <span class="gs-widget-actions">
-        ${hasChart ? `<button class="gs-widget-color" data-wid="${id}" title="Color 3D model"><i class="fa-solid fa-palette"></i></button>` : ""}
-        <button class="gs-widget-remove" data-wid="${id}" title="Remove"><i class="fa-solid fa-xmark"></i></button>
+        ${hasChart ? `<button class="gs-widget-color" data-wid="${id}" title="Color 3D model" aria-label="Apply colors"><i class="fa-solid fa-fill-drip"></i></button>` : ""}
+        <button class="gs-widget-edit" data-wid="${id}" title="Edit widget" aria-label="Edit widget"><i class="fa-solid fa-gear"></i></button>
+        <button class="gs-widget-remove" data-wid="${id}" title="Remove" aria-label="Remove widget"><i class="fa-solid fa-xmark"></i></button>
       </span>
     </div>
     <div class="gs-widget-body" id="${id}-body"></div>
@@ -113,20 +116,20 @@ function addWidget(type, config, pos) {
     e.stopPropagation();
     colorFrom(w);
   });
+  container.querySelector?.(`.gs-widget-edit[data-wid="${id}"]`)?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    showWidgetModal(w);
+  });
 
   renderWidgetContent(w);
-  saveLayout();
+  if (!skipSave) saveLayout();
   return id;
 }
 
 function removeWidget(id) {
   const w = widgets.find((w) => w.id === id);
   if (w?.chart) w.chart.destroy();
-
-  // Find the grid item containing the remove button for this widget
-  const btn = document.querySelector(`[data-wid="${id}"]`);
-  const el = btn?.closest(".grid-stack-item");
-  if (el && grid) grid.removeWidget(el);
+  if (w?.el && grid) grid.removeWidget(w.el);
 
   widgets = widgets.filter((w) => w.id !== id);
   saveLayout();
@@ -155,9 +158,11 @@ function renderWidgetContent(w) {
 /* ── Metric ── */
 
 function renderMetric(el, config, data) {
-  const count = data.filter((r) =>
-    r.Type && r.Type.toLowerCase().includes(config.filterType.toLowerCase())
-  ).length;
+  const col = config.column || "Type";
+  const filterVal = config.filterType || "";
+  const count = filterVal
+    ? data.filter((r) => String(r[col] ?? "").toLowerCase().includes(filterVal.toLowerCase())).length
+    : data.length;
 
   el.classList.add("gs-widget-body--metric");
   el.innerHTML = `
@@ -173,7 +178,7 @@ function renderBar(el, w, data) {
 
   const groups = groupBy(data, w.config.column);
   const sorted = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
-  const colors = makePalette(sorted.length);
+  const colors = categoricalPalette(sorted.length);
 
   // Store palette for color-splash
   w.palette = {};
@@ -183,13 +188,31 @@ function renderBar(el, w, data) {
   el.innerHTML = '<canvas style="position:absolute;inset:0;width:100%;height:100%"></canvas>';
   const ctx = el.querySelector("canvas").getContext("2d");
 
+  const defaultBg = [...colors];
+  const fadedBg = colors.map((c) => c.replace("70%", "30%"));
+  w.selectedIndex = -1;
+
+  function updateBarSelection(chart, idx) {
+    const ds = chart.data.datasets[0];
+    if (idx < 0) {
+      ds.backgroundColor = [...defaultBg];
+      ds.borderWidth = 0;
+      ds.borderColor = "transparent";
+    } else {
+      ds.backgroundColor = defaultBg.map((c, i) => i === idx ? c : fadedBg[i]);
+      ds.borderWidth = defaultBg.map((_, i) => i === idx ? 2 : 0);
+      ds.borderColor = defaultBg.map((c, i) => i === idx ? c : "transparent");
+    }
+    chart.update("none");
+  }
+
   w.chart = new Chart(ctx, {
     type: "bar",
     data: {
       labels: sorted.map(([k]) => truncate(k || "(empty)", 18)),
       datasets: [{
         data: sorted.map(([, v]) => v),
-        backgroundColor: colors,
+        backgroundColor: defaultBg,
         borderRadius: 3,
       }],
     },
@@ -203,10 +226,16 @@ function renderBar(el, w, data) {
         y: { ticks: { font: { size: 10 } } },
       },
       onClick: (_evt, elements) => {
-        if (elements.length === 0) { setFilter(w.config.column, null); return; }
+        if (elements.length === 0 || elements[0].index === w.selectedIndex) {
+          w.selectedIndex = -1;
+          setFilter(w.config.column, null);
+          updateBarSelection(w.chart, -1);
+          return;
+        }
         const idx = elements[0].index;
-        const value = sorted[idx][0];
-        setFilter(w.config.column, [value]);
+        w.selectedIndex = idx;
+        setFilter(w.config.column, [sorted[idx][0]]);
+        updateBarSelection(w.chart, idx);
       },
     },
   });
@@ -220,7 +249,7 @@ function renderDonut(el, w, data) {
   const groups = groupBy(data, w.config.column);
   const sorted = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
   const total = data.length;
-  const colors = makePalette(sorted.length);
+  const colors = categoricalPalette(sorted.length);
 
   // Store palette for color-splash
   w.palette = {};
@@ -230,13 +259,33 @@ function renderDonut(el, w, data) {
   el.innerHTML = '<canvas style="position:absolute;inset:0;width:100%;height:100%"></canvas>';
   const ctx = el.querySelector("canvas").getContext("2d");
 
+  const donutDefault = [...colors];
+  const donutFaded = colors.map((c) => c.replace("70%", "30%"));
+  w.selectedIndex = -1;
+
+  function updateDonutSelection(chart, idx) {
+    const ds = chart.data.datasets[0];
+    if (idx < 0) {
+      ds.backgroundColor = [...donutDefault];
+      ds.offset = 0;
+      ds.borderWidth = 1;
+      ds.borderColor = "var(--color-surface)";
+    } else {
+      ds.backgroundColor = donutDefault.map((c, i) => i === idx ? c : donutFaded[i]);
+      ds.offset = donutDefault.map((_, i) => i === idx ? 12 : 0);
+      ds.borderWidth = donutDefault.map((_, i) => i === idx ? 3 : 1);
+      ds.borderColor = donutDefault.map((c, i) => i === idx ? "#fff" : "rgba(255,255,255,.3)");
+    }
+    chart.update("none");
+  }
+
   w.chart = new Chart(ctx, {
     type: "doughnut",
     data: {
       labels: sorted.map(([k]) => truncate(k || "(empty)", 16)),
       datasets: [{
         data: sorted.map(([, v]) => v),
-        backgroundColor: colors,
+        backgroundColor: donutDefault,
         borderWidth: 1,
       }],
     },
@@ -253,10 +302,16 @@ function renderDonut(el, w, data) {
         },
       },
       onClick: (_evt, elements) => {
-        if (elements.length === 0) { setFilter(w.config.column, null); return; }
+        if (elements.length === 0 || (elements[0] && elements[0].index === w.selectedIndex)) {
+          w.selectedIndex = -1;
+          setFilter(w.config.column, null);
+          updateDonutSelection(w.chart, -1);
+          return;
+        }
         const idx = elements[0].index;
-        const value = sorted[idx][0];
-        setFilter(w.config.column, [value]);
+        w.selectedIndex = idx;
+        setFilter(w.config.column, [sorted[idx][0]]);
+        updateDonutSelection(w.chart, idx);
       },
     },
   });
@@ -288,55 +343,211 @@ function renderTable(el, config, data) {
       </tbody>
     </table>
   `;
-  el.style.overflowY = "auto";
 }
 
-/* ── Add Widget dialog ── */
+/* ── Widget config modal (add + edit) ── */
 
-function showAddWidgetDialog() {
-  // Close existing
+const COLUMNS = [
+  { key: "expressID", label: "ID" },
+  { key: "GlobalId", label: "GlobalId" },
+  { key: "Name", label: "Name" },
+  { key: "Type", label: "Type" },
+  { key: "Tag", label: "Tag" },
+];
+
+function showWidgetModal(editWidget) {
   const existing = document.querySelector(".add-widget-overlay");
-  if (existing) { existing.remove(); return; }
+  if (existing) existing.remove();
+
+  const isEdit = !!editWidget;
+  const curType = isEdit ? editWidget.type : "metric";
+  const curConfig = isEdit ? editWidget.config : {};
 
   const overlay = document.createElement("div");
   overlay.className = "add-widget-overlay";
   overlay.innerHTML = `
     <div class="add-widget-dialog">
-      <h3><i class="fa-solid fa-plus"></i> Add Widget</h3>
-      <label>Widget type</label>
-      <select id="aw-type">
-        ${Object.entries(WIDGET_TYPES).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join("")}
+      <h3><i class="fa-solid fa-${isEdit ? "gear" : "plus"}"></i> ${isEdit ? "Edit" : "Add"} Widget</h3>
+
+      <label for="aw-type">Widget type</label>
+      <select id="aw-type" ${isEdit ? "disabled" : ""}>
+        ${Object.entries(WIDGET_TYPES).map(([k, v]) =>
+          `<option value="${k}" ${k === curType ? "selected" : ""}>${v.label}</option>`
+        ).join("")}
       </select>
-      <label>Column / Filter</label>
-      <input id="aw-value" type="text" placeholder="e.g. Type, Wall, Slab..." value="Type">
+
+      <div id="aw-fields"></div>
+
+      <div id="aw-preview" class="aw-preview"></div>
+
       <div class="add-widget-dialog-actions">
         <button class="aw-cancel">Cancel</button>
-        <button class="aw-add">Add</button>
+        <button class="aw-add">${isEdit ? "Save" : "Add"}</button>
       </div>
     </div>
   `;
   document.body.appendChild(overlay);
 
-  // Close on overlay background click
+  const fieldsEl = overlay.querySelector("#aw-fields");
+  const previewEl = overlay.querySelector("#aw-preview");
+  const typeSelect = overlay.querySelector("#aw-type");
+
+  function renderFields() {
+    const type = typeSelect.value;
+    const data = getData();
+    const colOptions = COLUMNS.map((c) =>
+      `<option value="${c.key}">${esc(c.label)}</option>`
+    ).join("");
+
+    if (type === "metric") {
+      const selCol = curConfig.column || "Type";
+      const selVal = curConfig.filterType || "";
+      fieldsEl.innerHTML = `
+        <label for="aw-label">Label</label>
+        <input id="aw-label" type="text" value="${esc(curConfig.label || "")}" placeholder="e.g. Walls">
+
+        <label for="aw-column">Column</label>
+        <select id="aw-column">
+          ${COLUMNS.map((c) =>
+            `<option value="${c.key}" ${c.key === selCol ? "selected" : ""}>${esc(c.label)}</option>`
+          ).join("")}
+        </select>
+
+        <label for="aw-value">Value (filter match)</label>
+        <select id="aw-value">
+          <option value="">All (total count)</option>
+        </select>
+
+        <label for="aw-agg">Aggregation</label>
+        <select id="aw-agg">
+          <option value="count" selected>Count</option>
+        </select>
+      `;
+
+      const colSelect = fieldsEl.querySelector("#aw-column");
+      const valSelect = fieldsEl.querySelector("#aw-value");
+      const labelInput = fieldsEl.querySelector("#aw-label");
+
+      function populateValues() {
+        const col = colSelect.value;
+        const uniqueVals = [...new Set(data.map((r) => String(r[col] ?? "")))].sort();
+        valSelect.innerHTML =
+          `<option value="">All (total count)</option>` +
+          uniqueVals.map((v) =>
+            `<option value="${esc(v)}" ${v === selVal ? "selected" : ""}>${esc(v || "(empty)")}</option>`
+          ).join("");
+        updatePreview();
+      }
+
+      function updatePreview() {
+        const col = colSelect.value;
+        const val = valSelect.value;
+        const count = val
+          ? data.filter((r) => String(r[col] ?? "") === val).length
+          : data.length;
+        const label = labelInput.value || val || "Total";
+        previewEl.innerHTML = `<span class="aw-preview-num">${count}</span> <span class="aw-preview-label">${esc(label)}</span>`;
+      }
+
+      colSelect.addEventListener("change", () => {
+        populateValues();
+        if (!labelInput.value || labelInput.dataset.auto === "1") {
+          labelInput.value = valSelect.value || colSelect.selectedOptions[0]?.text || "";
+          labelInput.dataset.auto = "1";
+        }
+      });
+      valSelect.addEventListener("change", () => {
+        updatePreview();
+        if (!labelInput.value || labelInput.dataset.auto === "1") {
+          labelInput.value = valSelect.value || "Total";
+          labelInput.dataset.auto = "1";
+        }
+      });
+      labelInput.addEventListener("input", () => {
+        labelInput.dataset.auto = "0";
+        updatePreview();
+      });
+
+      populateValues();
+    } else {
+      const selCol = curConfig.column || "Type";
+      fieldsEl.innerHTML = `
+        <label for="aw-label">Label</label>
+        <input id="aw-label" type="text" value="${esc(curConfig.label || "")}" placeholder="e.g. Elements by Type">
+
+        <label for="aw-column">Group by column</label>
+        <select id="aw-column">
+          ${COLUMNS.map((c) =>
+            `<option value="${c.key}" ${c.key === selCol ? "selected" : ""}>${esc(c.label)}</option>`
+          ).join("")}
+        </select>
+      `;
+
+      const colSelect = fieldsEl.querySelector("#aw-column");
+      const labelInput = fieldsEl.querySelector("#aw-label");
+
+      colSelect.addEventListener("change", () => {
+        if (!labelInput.value || labelInput.dataset.auto === "1") {
+          labelInput.value = `${WIDGET_TYPES[type].label}: ${colSelect.selectedOptions[0]?.text || ""}`;
+          labelInput.dataset.auto = "1";
+        }
+      });
+      labelInput.addEventListener("input", () => { labelInput.dataset.auto = "0"; });
+
+      previewEl.innerHTML = "";
+
+      if (!curConfig.label) {
+        labelInput.value = `${WIDGET_TYPES[type].label}: ${colSelect.selectedOptions[0]?.text || "Type"}`;
+        labelInput.dataset.auto = "1";
+      }
+    }
+  }
+
+  typeSelect.addEventListener("change", () => {
+    // Reset config for new type
+    curConfig.label = "";
+    curConfig.column = "Type";
+    curConfig.filterType = "";
+    renderFields();
+  });
+
+  renderFields();
+
   overlay.addEventListener("click", (e) => {
     if (e.target === overlay) overlay.remove();
   });
-
   overlay.querySelector(".aw-cancel").addEventListener("click", () => overlay.remove());
+
   overlay.querySelector(".aw-add").addEventListener("click", () => {
-    const type = overlay.querySelector("#aw-type").value;
-    const value = overlay.querySelector("#aw-value").value.trim() || "Type";
+    const type = typeSelect.value;
+    const label = fieldsEl.querySelector("#aw-label")?.value.trim();
+    const column = fieldsEl.querySelector("#aw-column")?.value || "Type";
 
     let config;
     if (type === "metric") {
-      config = { filterType: value, label: value };
+      const filterType = fieldsEl.querySelector("#aw-value")?.value || "";
+      config = { column, filterType, label: label || filterType || "Total" };
     } else {
-      config = { column: value, label: `${WIDGET_TYPES[type].label}: ${value}` };
+      config = { column, label: label || `${WIDGET_TYPES[type].label}: ${column}` };
     }
 
-    addWidget(type, config);
+    if (isEdit) {
+      editWidget.config = config;
+      editWidget.type = type;
+      // Update header label
+      const titleEl = editWidget.el?.querySelector(".gs-widget-title");
+      if (titleEl) titleEl.textContent = config.label;
+      renderWidgetContent(editWidget);
+      saveLayout();
+    } else {
+      addWidget(type, config);
+    }
     overlay.remove();
   });
+}
+
+function showAddWidgetDialog() {
+  showWidgetModal(null);
 }
 
 /* ── Persistence ── */
@@ -362,6 +573,10 @@ function loadLayout() {
     if (!Array.isArray(parsed) || parsed.length === 0 || !parsed[0].type) {
       localStorage.removeItem(STORAGE_KEY);
       return null;
+    }
+    // Migrate: ensure all configs have column field
+    for (const item of parsed) {
+      if (item.config && !item.config.column) item.config.column = "Type";
     }
     return parsed;
   } catch {
@@ -392,25 +607,10 @@ function groupBy(data, key) {
   return counts;
 }
 
-function makePalette(n) {
-  const colors = [];
-  for (let i = 0; i < n; i++) {
-    const hue = (i * 360 / n) % 360;
-    colors.push(`hsl(${Math.round(hue)}, 70%, 55%)`);
-  }
-  return colors;
-}
-
 function resizeAllCharts() {
   for (const w of widgets) {
     if (w.chart) w.chart.resize();
   }
-}
-
-function esc(s) {
-  const d = document.createElement("div");
-  d.textContent = s;
-  return d.innerHTML;
 }
 
 function truncate(s, max) {

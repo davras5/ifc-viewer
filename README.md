@@ -1,48 +1,67 @@
-# IFC Viewer & Excel Exporter
+# IFC Viewer
 
-A lightweight, browser-based BIM viewer that loads .ifc files locally and exports building data to Excel. Built with `web-ifc-three` and `SheetJS`, it runs entirely in the browser using ES Modules—no build tools or backend required.
+A browser-based BIM viewer that loads IFC files locally with an interactive data table, color-by-attribute visualization, and Excel export. Built with `web-ifc-three` and `SheetJS` — runs entirely in the browser, no build tools or backend required.
 
 - Deployed: [davras5.github.io/ifc-viewer/](https://davras5.github.io/ifc-viewer/)
 
-![Preview](Preview.JPG)
+![Preview](assets/Preview1.jpg)
 
 ## Features
 
-- **Modern Glass UI**: A clean, floating interface built with Tailwind CSS and Glassmorphism effects.
-- **Fast IFC Loading**: Uses [web-ifc](https://github.com/thatopen/engine_web-ifc) (WASM) to parse Industry Foundation Classes (IFC) files natively in the browser.
-- **3D Navigation**: Smooth orbit controls with damping for intuitive model exploration.
-- **Property Inspection**: Click any element to view its full set of IFC properties (Name, GlobalID, Dimensions, etc.) in a floating side panel with red highlight selection.
-- **Excel Export**: Automatically scans the model for specific categories (Walls, Slabs, Doors, Windows, Columns, etc.) and extracts them into a formatted `.xlsx` report using SheetJS.
-- **Sample Model**: Built-in sample IFC generator for quick testing without external files.
-- **Zero-Install**: Single HTML file architecture using an Import Map. No Node.js build steps or bundlers required.
+- **3D IFC Viewer** — Load `.ifc` files via drag-and-drop or file picker. Smooth orbit controls with damping. Click any element to highlight it and inspect its properties.
+- **Sample Model** — Bundled full Revit architectural model (`assets/Ifc4_Revit_ARC.ifc`) for instant demo.
+- **Data Table** — Toggleable split-panel table with two tabs:
+  - **Elements** — ID, GlobalId, Name, Type, Tag for every building element.
+  - **Property Sets** — Flattened property rows (PSet Name, Property, Value) per element.
+  - Sortable columns, search bar, pagination, column visibility, and Excel/CSV export.
+- **Filter by Column** — Click the filter icon on any column header to show/hide rows by value. Supports multi-column filtering with live search across unique values.
+- **Color by Column** — Apply categorical or gradient coloring to 3D geometry based on any column attribute. Each unique value gets a distinct color mapped to both the 3D subsets and the table cells. A floating legend panel shows the full color mapping.
+- **Bidirectional Selection** — Click a table row to highlight the element in 3D; click an element in 3D to highlight and scroll to its table row.
+- **Property Inspector** — Floating side panel showing all IFC properties for the selected element.
+- **Excel Export** — Scans the model for architectural categories (Walls, Slabs, Doors, Windows, Columns, etc.) and exports a formatted `.xlsx` report with property sets via SheetJS.
+- **Loading Overlay** — Full-viewport spinner with progressive status messages during model parsing, data extraction, and color application.
+
+## Project Structure
+
+```
+ifc-viewer/
+├── index.html              — App shell (layout, controls, panels)
+├── css/
+│   ├── tokens.css          — Design tokens (colors, sizes)
+│   └── main.css            — Layout, table, dropdown, legend styles
+├── js/
+│   ├── app.js              — Three.js scene, IFC loading, selection, color subsets
+│   ├── table.js            — Table widget (tabs, search, sort, filter, color-by, pagination)
+│   └── color-palette.js    — HSL palette generation for categorical/gradient coloring
+└── assets/
+    └── Ifc4_Revit_ARC.ifc  — Sample Revit model
+```
 
 ## Technology Stack
 
-- **3D Core**: [Three.js](https://threejs.org/) (v0.155.0)
-- **IFC Loader**: [web-ifc-three](https://github.com/IFCjs/web-ifc-three) (v0.0.126)
-- **IFC Parsing**: [web-ifc](https://github.com/thatopen/engine_web-ifc) (v0.0.66 - WASM)
-- **Raycast Acceleration**: [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) (v0.5.23)
-- **Excel Generation**: [SheetJS](https://sheetjs.com/) (v0.20.1)
-- **Styling**: Tailwind CSS + FontAwesome 6.4.0 (via CDN)
+| Layer | Library | Version |
+|-------|---------|---------|
+| 3D Core | [Three.js](https://threejs.org/) | 0.155.0 |
+| IFC Loader | [web-ifc-three](https://github.com/IFCjs/web-ifc-three) | 0.0.126 |
+| IFC Parsing | [web-ifc](https://github.com/thatopen/engine_web-ifc) (WASM) | 0.0.66 |
+| Raycast Acceleration | [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) | 0.5.23 |
+| Excel Generation | [SheetJS](https://sheetjs.com/) | 0.20.1 |
+| Styling | Tailwind CSS + Font Awesome 6.4.0 | CDN |
 
 ## How to Run
 
-Because this project uses ES Modules and loads WebAssembly (`.wasm`) files, browser security policies (CORS) prevent it from running directly from the file system (`file://`). You must use a local static server.
+This project uses ES Modules and WebAssembly, so it requires a local HTTP server (not `file://`).
 
 ### Option 1: VS Code (Recommended)
-1. Install the **"Live Server"** extension for VS Code.
+1. Install the **"Live Server"** extension.
 2. Open the project folder.
-3. Right-click `index.html` and select **"Open with Live Server"**.
+3. Right-click `index.html` → **"Open with Live Server"**.
 
 ### Option 2: Python
-If you have Python installed, open your terminal in the project folder and run:
-
 ```bash
-# Python 3
 python -m http.server 8000
 ```
-
-Then open `http://localhost:8000` in your browser.
+Open `http://localhost:8000`.
 
 ### Option 3: Node.js
 ```bash

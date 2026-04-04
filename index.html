@@ -6,9 +6,16 @@
     <title>IFC Viewer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
+
     <!-- SheetJS for Excel Export -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+
+    <!-- Gridstack -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@10/dist/gridstack.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/gridstack@10/dist/gridstack-all.min.js"></script>
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
 
     <!-- Import Map -->
     <script type="importmap">
@@ -30,83 +37,118 @@
 <body>
 <div id="app-layout">
 
-    <!-- Top: 3D viewer area (relative, so overlays position inside it) -->
-    <div id="viewer-area">
-        <div id="viewer-container"></div>
+    <div id="main-row">
 
-        <!-- Global loading overlay -->
-        <div id="loading-overlay" class="loading-overlay hidden">
-            <div class="loading-spinner">
-                <i class="fa-solid fa-spinner fa-spin"></i>
-                <span id="loading-text">Loading...</span>
-            </div>
-        </div>
+        <!-- Left column: viewer + table stacked -->
+        <div id="left-column">
+            <div id="viewer-area">
+                <div id="viewer-container"></div>
 
-        <!-- Main Controls -->
-        <div class="absolute top-5 left-5 w-80 glass-panel rounded-xl p-4 flex flex-col gap-4 z-10">
-            <div class="flex items-center gap-3 border-b border-gray-200 pb-3">
-                <i class="fa-solid fa-cube text-2xl text-blue-600"></i>
-                <div>
-                    <h1 class="font-bold text-gray-800 text-lg">IFC Viewer</h1>
-                    <p class="text-xs text-gray-500">Engine: web-ifc 0.0.66</p>
+                <!-- Global loading overlay -->
+                <div id="loading-overlay" class="loading-overlay hidden">
+                    <div class="loading-spinner">
+                        <i class="fa-solid fa-spinner fa-spin"></i>
+                        <span id="loading-text">Loading...</span>
+                    </div>
                 </div>
-            </div>
 
-            <input type="file" id="file-input" accept=".ifc" class="hidden" />
+                <!-- Toggle bar (top center) -->
+                <div id="toggle-bar" class="toggle-bar glass-panel">
+                    <button id="tb-controls" class="tb-btn active" title="Controls">
+                        <i class="fa-solid fa-wrench"></i>
+                    </button>
+                    <button id="tb-table" class="tb-btn" title="Table">
+                        <i class="fa-solid fa-table"></i>
+                    </button>
+                    <button id="tb-dashboard" class="tb-btn" title="Dashboard">
+                        <i class="fa-solid fa-chart-pie"></i>
+                    </button>
+                </div>
 
-            <div class="flex flex-col gap-2">
-                <button onclick="document.getElementById('file-input').click()"
-                    class="w-full flex items-center justify-center py-2 bg-white border hover:bg-gray-50 rounded-lg text-sm font-medium transition shadow-sm">
-                    <i class="fa-solid fa-folder-open text-blue-500 mr-2"></i> Open IFC
+                <!-- Controls Panel -->
+                <div id="controls-panel" class="absolute top-5 left-5 w-80 glass-panel rounded-xl p-4 flex flex-col gap-4 z-10">
+                    <div class="flex items-center gap-3 border-b border-gray-200 pb-3">
+                        <i class="fa-solid fa-cube text-2xl text-blue-600"></i>
+                        <div>
+                            <h1 class="font-bold text-gray-800 text-lg">IFC Viewer</h1>
+                            <p class="text-xs text-gray-500">Engine: web-ifc 0.0.66</p>
+                        </div>
+                        <button id="controls-close" title="Close panel"><i class="fa-solid fa-times"></i></button>
+                    </div>
+
+                    <input type="file" id="file-input" accept=".ifc" class="hidden" />
+
+                    <div class="flex flex-col gap-2">
+                        <button onclick="document.getElementById('file-input').click()"
+                            class="w-full flex items-center justify-center py-2 bg-white border hover:bg-gray-50 rounded-lg text-sm font-medium transition shadow-sm">
+                            <i class="fa-solid fa-folder-open text-blue-500 mr-2"></i> Open IFC
+                        </button>
+
+                        <button id="sample-btn"
+                            class="w-full flex items-center justify-center py-2 bg-gray-50 border border-dashed hover:bg-white rounded-lg text-sm font-medium text-gray-600 transition shadow-sm">
+                            <i class="fa-solid fa-rocket text-purple-500 mr-2"></i> Load Sample
+                        </button>
+                    </div>
+
+                    <button id="export-btn" disabled
+                        class="flex items-center justify-center w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition shadow-sm">
+                        <i class="fa-solid fa-file-excel mr-2"></i> Export Excel
+                    </button>
+
+                    <div id="status" class="hidden text-xs bg-blue-50 text-blue-700 p-2 rounded border border-blue-100 leading-relaxed break-words"></div>
+                </div>
+
+                <!-- Properties Panel -->
+                <div id="prop-panel" class="absolute top-5 right-5 w-80 glass-panel rounded-xl hidden flex-col max-h-[80vh] z-10">
+                    <div class="p-3 bg-gray-50 border-b flex justify-between items-center rounded-t-xl">
+                        <span class="font-bold text-xs uppercase text-gray-600">Properties</span>
+                        <button onclick="closePropPanel()" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
+                    </div>
+                    <div id="prop-content" class="p-3 overflow-y-auto text-xs space-y-2"></div>
+                </div>
+
+                <!-- Table toggle -->
+                <button id="tbl-toggle" class="tbl-toggle" title="Toggle table">
+                    <i class="fa-solid fa-chevron-up tbl-toggle-arrow"></i>
+                    <span>Table</span>
                 </button>
 
-                <button id="sample-btn"
-                    class="w-full flex items-center justify-center py-2 bg-gray-50 border border-dashed hover:bg-white rounded-lg text-sm font-medium text-gray-600 transition shadow-sm">
-                    <i class="fa-solid fa-rocket text-purple-500 mr-2"></i> Load Sample
+                <!-- Footer -->
+                <div class="absolute bottom-4 right-4 z-10">
+                    <a href="https://github.com/davras5/ifc-viewer/" target="_blank"
+                       class="glass-footer px-3 py-2 rounded-full text-xs text-gray-300 hover:text-white hover:bg-gray-800 transition flex items-center gap-2 no-underline">
+                        <i class="fa-brands fa-github text-lg"></i>
+                        <span>davras5/ifc-viewer</span>
+                    </a>
+                </div>
+
+            </div>
+
+            <!-- Table panel (inside left column) -->
+            <div id="table-panel"></div>
+        </div>
+
+        <!-- Right: Dashboard panel (full height) -->
+        <div id="right-panel" class="right-panel">
+            <div id="rp-resize-handle" class="rp-resize-handle"></div>
+            <div id="dashboard-panel" class="dashboard-panel">
+                <div class="dashboard-header">
+                    <span class="dashboard-title"><i class="fa-solid fa-chart-pie"></i> Dashboard</span>
+                    <button id="dashboard-close" class="dashboard-close" title="Close dashboard"><i class="fa-solid fa-times"></i></button>
+                </div>
+                <div id="color-legend" class="color-legend"></div>
+                <div id="gs-grid" class="grid-stack"></div>
+                <button id="add-widget-btn" class="add-widget-btn">
+                    <i class="fa-solid fa-plus"></i> Add Widget
                 </button>
             </div>
-
-            <button id="export-btn" disabled
-                class="flex items-center justify-center w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white disabled:bg-gray-400 disabled:cursor-not-allowed rounded-lg text-sm font-medium transition shadow-sm">
-                <i class="fa-solid fa-file-excel mr-2"></i> Export Excel
-            </button>
-
-            <div id="status" class="hidden text-xs bg-blue-50 text-blue-700 p-2 rounded border border-blue-100 leading-relaxed break-words"></div>
         </div>
 
-        <!-- Properties Panel -->
-        <div id="prop-panel" class="absolute top-5 right-5 w-80 glass-panel rounded-xl hidden flex-col max-h-[80vh] z-10">
-            <div class="p-3 bg-gray-50 border-b flex justify-between items-center rounded-t-xl">
-                <span class="font-bold text-xs uppercase text-gray-600">Properties</span>
-                <button onclick="closePropPanel()" class="text-gray-400 hover:text-red-500"><i class="fa-solid fa-times"></i></button>
-            </div>
-            <div id="prop-content" class="p-3 overflow-y-auto text-xs space-y-2"></div>
-        </div>
-
-        <!-- Color Legend Panel -->
-        <div id="color-legend" class="color-legend glass-panel rounded-xl hidden z-10"></div>
-
-        <!-- Footer (inside viewer area) -->
-        <div class="absolute bottom-4 right-4 z-10">
-            <a href="https://github.com/davras5/ifc-viewer/" target="_blank"
-               class="glass-footer px-3 py-2 rounded-full text-xs text-gray-300 hover:text-white hover:bg-gray-800 transition flex items-center gap-2 no-underline">
-                <i class="fa-brands fa-github text-lg"></i>
-                <span>davras5/ifc-viewer</span>
-            </a>
-        </div>
-
-        <!-- Table toggle (bottom edge of viewer) -->
-        <button id="tbl-toggle" class="tbl-toggle" title="Toggle table">
-            <i class="fa-solid fa-chevron-up tbl-toggle-arrow"></i>
-            <span>Table</span>
-        </button>
     </div>
-
-    <!-- Bottom: Table panel -->
-    <div id="table-panel"></div>
 
 </div>
 
-    <script type="module" src="js/app.js"></script>
+<script type="module" src="js/dashboard.js"></script>
+<script type="module" src="js/app.js"></script>
 </body>
 </html>

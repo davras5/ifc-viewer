@@ -20,4 +20,16 @@
     --tbl-text: #1f2937;
     --tbl-text-muted: #6b7280;
     --tbl-height: 40vh;
+
+    /* Right panel / Dashboard */
+    --right-panel-width: 300px;
+    --right-panel-bg: #ffffff;
+    --right-panel-border: #e5e7eb;
+    --dash-widget-border: #e5e7eb;
+    --dash-widget-radius: 8px;
+    --dash-widget-shadow: 0 1px 3px rgba(0,0,0,.08);
+
+    /* Toggle bar */
+    --toggle-bar-active: #3b82f6;
+    --toggle-bar-inactive: #6b7280;
 }

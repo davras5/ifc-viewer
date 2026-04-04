@@ -4,7 +4,9 @@
       "Read(//c/Users/DavidRasner/Documents/GitHub/landcover-survey/**)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:json-render.dev)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:gridstackjs.com)",
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,6\\\\}\\\\|rgb\\\\|hsl\" /c/Users/DavidRasner/Documents/GitHub/ifc-viewer/css/main.css)"
     ]
   }
 }

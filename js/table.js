@@ -56,6 +56,23 @@ let colorByConfig = null;
 
 let onColorByChange = null;
 
+// 3D filter sync
+let sync3D = true;
+let onFilterChange = null;
+
+// Track document-level listeners for cleanup on re-render
+let docListeners = [];
+function addDocListener(event, fn) {
+  document.addEventListener(event, fn);
+  docListeners.push({ event, fn });
+}
+function removeAllDocListeners() {
+  for (const { event, fn } of docListeners) {
+    document.removeEventListener(event, fn);
+  }
+  docListeners = [];
+}
+
 /* ── Column definitions ── */
 
 const ELEMENT_COLS = [
@@ -98,6 +115,67 @@ export function onColorBy(callback) {
   onColorByChange = callback;
 }
 
+let onLegendVisibilityChange = null;
+export function onLegendChange(callback) {
+  onLegendVisibilityChange = callback;
+}
+
+export function onFilter(callback) {
+  onFilterChange = callback;
+}
+
+/** Programmatically set a column filter (called from dashboard chart clicks) */
+export function setFilter(column, values) {
+  // Only works on elements tab for now
+  if (values && values.length > 0) {
+    eFilters[column] = new Set(values.map(String));
+  } else {
+    delete eFilters[column];
+  }
+  ePage = 1;
+  if (activeTab !== "elements") {
+    activeTab = "elements";
+    container?.querySelectorAll(".tbl-tab").forEach((t) => {
+      t.classList.toggle("active", t.dataset.tab === "elements");
+      t.setAttribute("aria-selected", t.dataset.tab === "elements");
+    });
+    container?.querySelector("#ttab-elements")?.classList.toggle("active", true);
+    container?.querySelector("#ttab-psets")?.classList.toggle("active", false);
+    updateColumnsDropdown();
+  }
+  renderActiveTab();
+  updateHeaderIndicators("e");
+  fireFilterChange();
+}
+
+/** Programmatically apply color-by from external source (dashboard charts) */
+export function applyColorByColumn(column, valueToColor) {
+  const data = elementsData;
+  const palette = new Map(Object.entries(valueToColor));
+
+  const expressIDsByValue = new Map();
+  data.forEach((row) => {
+    const v = String(row[column] ?? "");
+    if (!expressIDsByValue.has(v)) expressIDsByValue.set(v, []);
+    expressIDsByValue.get(v).push(row.expressID);
+  });
+
+  colorByConfig = { tab: "elements", key: column, mode: "categorical", palette };
+
+  if (onColorByChange) {
+    onColorByChange({
+      column,
+      mode: "categorical",
+      valueToColor: palette,
+      expressIDsByValue,
+    });
+  }
+
+  renderActiveTab();
+  updateHeaderIndicators("e");
+  updateLegend();
+}
+
 export function resetColorBy() {
   if (colorByConfig) {
     colorByConfig = null;
@@ -115,8 +193,13 @@ function updateLegend() {
   if (!panel) return;
 
   if (!colorByConfig) {
-    panel.classList.add("hidden");
-    panel.innerHTML = "";
+    panel.innerHTML = `
+      <div class="color-legend-empty">
+        <i class="fa-solid fa-palette"></i>
+        <span>No colors applied. Use the <i class="fa-solid fa-filter"></i> column filter to color by attribute.</span>
+      </div>
+    `;
+    if (onLegendVisibilityChange) onLegendVisibilityChange(false);
     return;
   }
 
@@ -139,7 +222,9 @@ function updateLegend() {
         <div class="color-legend-title">Color by</div>
         <div class="color-legend-col">${esc(colLabel)}</div>
       </div>
-      <button class="color-legend-close" id="legend-close" title="Close">&times;</button>
+      <button class="color-legend-clear" id="legend-clear" title="Clear colors">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
     </div>
     <div class="color-legend-body">
       ${entries
@@ -153,16 +238,10 @@ function updateLegend() {
         )
         .join("")}
     </div>
-    <div class="color-legend-footer">
-      <button class="color-legend-clear" id="legend-clear">
-        <i class="fa-solid fa-xmark"></i> Clear colors
-      </button>
-    </div>
   `;
 
-  panel.classList.remove("hidden");
+  if (onLegendVisibilityChange) onLegendVisibilityChange(true);
 
-  panel.querySelector("#legend-close").addEventListener("click", () => resetColorBy());
   panel.querySelector("#legend-clear").addEventListener("click", () => resetColorBy());
 }
 
@@ -243,6 +322,64 @@ function switchToTab(tabName) {
   renderActiveTab();
 }
 
+/* ── Filter pills ── */
+
+function renderFilterPills() {
+  const el = container?.querySelector("#tbl-filter-pills");
+  if (!el) return;
+
+  const filters = activeTab === "elements" ? eFilters : pFilters;
+  const cols = activeCols();
+  const keys = Object.keys(filters);
+
+  if (keys.length === 0) {
+    el.innerHTML = "";
+    return;
+  }
+
+  let html = keys.map((key) => {
+    const col = cols.find((c) => c.key === key);
+    const label = col ? col.label : key;
+    const values = [...filters[key]];
+    const display = values.length <= 2
+      ? values.map((v) => esc(v || "(empty)")).join(", ")
+      : `${values.length} values`;
+    return `<span class="filter-pill" data-filter-key="${esc(key)}">
+      <span class="filter-pill-label">${esc(label)}: ${display}</span>
+      <button class="filter-pill-x" data-filter-key="${esc(key)}"><i class="fa-solid fa-xmark"></i></button>
+    </span>`;
+  }).join("");
+
+  html += `<button class="filter-pill filter-pill--reset" id="filter-reset-all">
+    <i class="fa-solid fa-xmark"></i> Reset All
+  </button>`;
+
+  el.innerHTML = html;
+
+  // Per-filter remove
+  el.querySelectorAll(".filter-pill-x").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const key = btn.dataset.filterKey;
+      const f = activeTab === "elements" ? eFilters : pFilters;
+      delete f[key];
+      if (activeTab === "elements") ePage = 1; else pPage = 1;
+      renderActiveTab();
+      updateHeaderIndicators(activeTab === "elements" ? "e" : "ps");
+      fireFilterChange();
+    });
+  });
+
+  // Reset all
+  el.querySelector("#filter-reset-all")?.addEventListener("click", () => {
+    if (activeTab === "elements") { eFilters = {}; ePage = 1; }
+    else { pFilters = {}; pPage = 1; }
+    renderActiveTab();
+    updateHeaderIndicators(activeTab === "elements" ? "e" : "ps");
+    fireFilterChange();
+  });
+}
+
 /* ── Filter helpers ── */
 
 function applyFilters(data, filters) {
@@ -269,6 +406,10 @@ function getUniqueValues(data, key) {
 /* ── Shell ── */
 
 function renderShell() {
+  // Cleanup old document listeners before rebuilding
+  removeAllDocListeners();
+  closeHeaderDropdown();
+
   container.innerHTML = `
     <div class="tbl-resize-handle" id="tbl-resize-handle" title="Drag to resize"></div>
     <div class="tbl-inner">
@@ -284,7 +425,11 @@ function renderShell() {
             <i class="fa-solid fa-xmark"></i>
           </button>
         </div>
+        <div class="tbl-filter-pills" id="tbl-filter-pills"></div>
         <div class="tbl-actions">
+          <button class="tbl-action-btn tbl-sync3d-btn active" id="sync3d-btn" title="Sync filters with 3D viewer">
+            <i class="fa-solid fa-cube"></i> Sync 3D
+          </button>
           <div class="tbl-dropdown">
             <button class="tbl-action-btn" id="col-dropdown-btn">
               <i class="fa-solid fa-table-columns"></i> Columns <i class="fa-solid fa-chevron-down fa-xs"></i>
@@ -383,6 +528,14 @@ function renderShell() {
     searchInput.focus();
   });
 
+  // Sync 3D toggle
+  const sync3dBtn = container.querySelector("#sync3d-btn");
+  sync3dBtn.addEventListener("click", () => {
+    sync3D = !sync3D;
+    sync3dBtn.classList.toggle("active", sync3D);
+    fireFilterChange();
+  });
+
   // Columns dropdown
   setupDropdown("col-dropdown-btn", "col-dropdown-menu");
   container
@@ -407,7 +560,7 @@ function renderShell() {
   updateColumnsDropdown();
 
   // Close header dropdown on outside click
-  document.addEventListener("click", (e) => {
+  addDocListener("click", (e) => {
     if (!e.target.closest(".th-dropdown") && !e.target.closest(".th-dd-btn")) {
       closeHeaderDropdown();
     }
@@ -424,7 +577,7 @@ function setupDropdown(btnId, menuId) {
     });
     menu.classList.toggle("show");
   });
-  document.addEventListener("click", (e) => {
+  addDocListener("click", (e) => {
     if (!e.target.closest(`#${menuId}`) && !e.target.closest(`#${btnId}`)) {
       menu.classList.remove("show");
     }
@@ -644,6 +797,43 @@ function commitFilter(key, prefix, filterList, allValues) {
 
   renderActiveTab();
   updateHeaderIndicators(prefix);
+  fireFilterChange();
+}
+
+/* ── 3D filter sync ── */
+
+function fireFilterChange() {
+  if (!onFilterChange) return;
+  if (!sync3D) {
+    onFilterChange(null); // clear 3D filter
+    return;
+  }
+
+  // Always use elements data for 3D filtering
+  const data = elementsData;
+  const filters = eFilters;
+  const filterKeys = Object.keys(filters);
+
+  if (filterKeys.length === 0) {
+    onFilterChange(null); // no filters active
+    return;
+  }
+
+  const allIDs = new Set(data.map((r) => r.expressID));
+  const visibleIDs = new Set();
+  const hiddenIDs = new Set();
+
+  for (const row of data) {
+    let passes = true;
+    for (const key of filterKeys) {
+      const val = String(row[key] ?? "");
+      if (!filters[key].has(val)) { passes = false; break; }
+    }
+    if (passes) visibleIDs.add(row.expressID);
+    else hiddenIDs.add(row.expressID);
+  }
+
+  onFilterChange({ visibleIDs: [...visibleIDs], hiddenIDs: [...hiddenIDs] });
 }
 
 /* ── Color-by logic ── */
@@ -869,6 +1059,7 @@ function renderElements() {
     });
 
   updateHeaderIndicators("e");
+  renderFilterPills();
 }
 
 /* ── PropSets tab ── */
@@ -953,6 +1144,7 @@ function renderPsets() {
     });
 
   updateHeaderIndicators("ps");
+  renderFilterPills();
 }
 
 /* ── Row swatch (left border color when color-by is active) ── */

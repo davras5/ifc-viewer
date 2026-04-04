@@ -3,8 +3,12 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { IFCLoader } from 'web-ifc-three';
 import * as WebIFC from 'web-ifc';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
-import { initTable, populateTable, highlightRow, toggle as toggleTable, onColorBy, resetColorBy } from './table.js';
+import { initTable, populateTable, highlightRow, toggle as toggleTable, onColorBy, onLegendChange, onFilter, resetColorBy } from './table.js';
 import { cssColorToHex } from './color-palette.js';
+import { initDashboard, refreshDashboard } from './dashboard.js';
+
+// --- HTML escape helper ---
+const esc = (s) => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; };
 
 // --- Setup BVH ---
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -53,11 +57,7 @@ const highlightMaterial = new THREE.MeshLambertMaterial({
     depthTest: false
 });
 
-let currentSelection = {
-    modelID: null,
-    id: null,
-    subset: null
-};
+let currentSelection = { subset: null };
 
 async function initIFCEngine() {
     if (isEngineInitialized) return;
@@ -107,7 +107,89 @@ initTable(tablePanel, {
     onElementSelect: (expressID) => selectElementById(expressID),
 });
 
-tblToggleBtn.addEventListener('click', toggleTable);
+tblToggleBtn.addEventListener('click', () => { toggleTable(); syncTableButton(); });
+
+// --- Toggle bar + panel visibility ---
+const controlsPanel = document.getElementById('controls-panel');
+const rightPanel = document.getElementById('right-panel');
+const tbControls = document.getElementById('tb-controls');
+const tbTable = document.getElementById('tb-table');
+const tbDashboard = document.getElementById('tb-dashboard');
+const controlsClose = document.getElementById('controls-close');
+
+let controlsOpen = true;
+let dashboardOpen = false;
+
+function syncTableButton() {
+    const open = tablePanel.classList.contains('open');
+    tbTable.classList.toggle('active', open);
+}
+
+function setControlsOpen(open) {
+    controlsOpen = open;
+    controlsPanel.classList.toggle('hidden', !open);
+    tbControls.classList.toggle('active', open);
+}
+
+function setDashboardOpen(open) {
+    dashboardOpen = open;
+    rightPanel.classList.toggle('open', open);
+    tbDashboard.classList.toggle('active', open);
+    // After transition, tell Gridstack to recalculate column widths
+    if (open) {
+        rightPanel.addEventListener('transitionend', function onEnd() {
+            rightPanel.removeEventListener('transitionend', onEnd);
+            window.dispatchEvent(new Event('resize'));
+        });
+    }
+}
+
+tbControls.addEventListener('click', () => setControlsOpen(!controlsOpen));
+tbTable.addEventListener('click', () => { toggleTable(); syncTableButton(); });
+tbDashboard.addEventListener('click', () => setDashboardOpen(!dashboardOpen));
+controlsClose.addEventListener('click', () => setControlsOpen(false));
+document.getElementById('dashboard-close').addEventListener('click', () => setDashboardOpen(false));
+
+// Right panel resize handle
+const rpHandle = document.getElementById('rp-resize-handle');
+rpHandle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    rpHandle.setPointerCapture(e.pointerId);
+    rpHandle.classList.add('dragging');
+    rightPanel.style.transition = 'none';
+    const startX = e.clientX;
+    const startW = rightPanel.getBoundingClientRect().width;
+
+    function onMove(ev) {
+        const delta = startX - ev.clientX;
+        const newW = Math.min(600, Math.max(200, startW + delta));
+        rightPanel.style.width = newW + 'px';
+        window.dispatchEvent(new Event('resize'));
+    }
+    function onUp() {
+        rpHandle.classList.remove('dragging');
+        rightPanel.style.transition = '';
+        rpHandle.removeEventListener('pointermove', onMove);
+        rpHandle.removeEventListener('pointerup', onUp);
+        rpHandle.removeEventListener('lostpointercapture', onUp);
+    }
+    rpHandle.addEventListener('pointermove', onMove);
+    rpHandle.addEventListener('pointerup', onUp);
+    rpHandle.addEventListener('lostpointercapture', onUp);
+});
+
+// When color legend appears, auto-open the dashboard panel
+onLegendChange((visible) => {
+    if (visible && !dashboardOpen) {
+        setDashboardOpen(true);
+    }
+});
+
+// Init dashboard
+initDashboard();
+
+// Shared data for dashboard
+window.__ifcViewerData = { elements: [], psets: [] };
 
 // --- Global loading overlay ---
 const loadingOverlay = document.getElementById('loading-overlay');
@@ -138,16 +220,27 @@ function getOrCreateMaterial(hexColor) {
     return mat;
 }
 
+let lastColorConfig = null;
+let currentFilteredIDs = null; // Set of visible IDs when filter is active
+
 function applyColorSubsets(config) {
+    lastColorConfig = config;
     clearColorSubsets();
     if (!config || !ifcModel) return;
+
     for (const [value, ids] of config.expressIDsByValue) {
+        // If filter is active, only color the visible elements
+        const filteredIds = currentFilteredIDs
+            ? ids.filter(id => currentFilteredIDs.has(id))
+            : ids;
+        if (filteredIds.length === 0) continue;
+
         const cssColor = config.valueToColor.get(value);
         const hex = cssColorToHex(cssColor);
         const material = getOrCreateMaterial(hex);
         const subset = ifcLoader.ifcManager.createSubset({
             modelID: ifcModel.modelID,
-            ids,
+            ids: filteredIds,
             material,
             scene,
             removePrevious: false,
@@ -165,9 +258,100 @@ function clearColorSubsets() {
 }
 
 onColorBy(async (config) => {
-    if (config) showLoading('Applying colors...');
-    applyColorSubsets(config);
-    hideLoading();
+    try {
+        if (config) showLoading('Applying colors...');
+        await new Promise(r => setTimeout(r, 30));
+        applyColorSubsets(config);
+    } catch (err) {
+        console.error('Color apply error:', err);
+    } finally {
+        hideLoading();
+    }
+});
+
+// --- 3D filter sync ---
+// Strategy: hide the original model, show a "visible" subset (original material)
+// and a "ghost" subset (transparent gray) for filtered-out elements.
+const ghostMaterial = new THREE.MeshLambertMaterial({
+    color: 0xcccccc,
+    transparent: true,
+    opacity: 0.1,
+    depthTest: true,
+});
+const visibleFilterMaterial = new THREE.MeshLambertMaterial({
+    color: 0xdddddd,
+    transparent: false,
+});
+let ghostSubset = null;
+let visibleSubset = null;
+let filterActive = false;
+
+function applyFilterSubsets(filterData) {
+    clearFilterSubsets();
+    if (!filterData || !ifcModel) return;
+
+    filterActive = true;
+    currentFilteredIDs = new Set(filterData.visibleIDs);
+
+    // Hide the original model
+    ifcModel.visible = false;
+
+    // Show filtered-in elements with original-like material
+    if (filterData.visibleIDs.length > 0) {
+        visibleSubset = ifcLoader.ifcManager.createSubset({
+            modelID: ifcModel.modelID,
+            ids: filterData.visibleIDs,
+            material: visibleFilterMaterial,
+            scene,
+            removePrevious: true,
+        });
+    }
+
+    // Ghost filtered-out elements (not clickable)
+    if (filterData.hiddenIDs.length > 0) {
+        ghostSubset = ifcLoader.ifcManager.createSubset({
+            modelID: ifcModel.modelID,
+            ids: filterData.hiddenIDs,
+            material: ghostMaterial,
+            scene,
+            removePrevious: true,
+        });
+        if (ghostSubset) ghostSubset.raycast = () => {};
+    }
+
+    // Re-apply color subsets with only visible IDs
+    if (lastColorConfig) applyColorSubsets(lastColorConfig);
+}
+
+function clearFilterSubsets() {
+    if (!ifcModel) return;
+    if (visibleSubset) {
+        ifcLoader.ifcManager.removeSubset(ifcModel.modelID, visibleFilterMaterial);
+        visibleSubset = null;
+    }
+    if (ghostSubset) {
+        ifcLoader.ifcManager.removeSubset(ifcModel.modelID, ghostMaterial);
+        ghostSubset = null;
+    }
+    if (filterActive) {
+        ifcModel.visible = true;
+        filterActive = false;
+        currentFilteredIDs = null;
+        // Re-apply full color subsets (unfiltered)
+        if (lastColorConfig) applyColorSubsets(lastColorConfig);
+    }
+}
+
+onFilter(async (filterData) => {
+    try {
+        if (filterData) showLoading('Syncing 3D view...');
+        await new Promise(r => setTimeout(r, 20));
+        applyFilterSubsets(filterData);
+    } catch (err) {
+        console.error('Filter sync error:', err);
+    } finally {
+        hideLoading();
+    }
 });
 
 // --- 4. UI Logic ---
@@ -206,7 +390,13 @@ function setStatus(msg, type='loading') {
 // --- 5. Main Loading Logic (Reusable) ---
 async function loadModel(url) {
     if(ifcModel) {
+        lastColorConfig = null;
+        currentFilteredIDs = null;
         clearColorSubsets();
+        clearFilterSubsets();
+        // Dispose cached materials
+        for (const mat of materialCache.values()) mat.dispose();
+        materialCache.clear();
         resetColorBy();
         scene.remove(ifcModel);
         ifcLoader.ifcManager.removeSubset(ifcModel.modelID, highlightMaterial);
@@ -243,6 +433,9 @@ async function loadModel(url) {
         const { elements, psets, totalCount } = await extractTableData(ifcModel.modelID);
 
         populateTable(elements, psets);
+        syncTableButton();
+        window.__ifcViewerData = { elements, psets };
+        refreshDashboard();
         hideLoading();
 
         setStatus(`<b>Loaded!</b><br/>~${totalCount} Elements`, 'success');
@@ -327,6 +520,7 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
     if(!file) return;
     const url = URL.createObjectURL(file);
     await loadModel(url);
+    URL.revokeObjectURL(url);
 });
 
 // Sample Model
@@ -415,8 +609,8 @@ window.addEventListener('pointerup', async (event) => {
 
 function showProps(props) {
     propPanel.classList.remove('hidden');
-    const name = props.Name && props.Name.value ? props.Name.value : 'Unnamed Element';
-    const type = props.constructor.name.replace('Ifc', '').toUpperCase();
+    const name = esc(props.Name && props.Name.value ? props.Name.value : 'Unnamed Element');
+    const type = esc(props.constructor.name.replace('Ifc', '').toUpperCase());
 
     let html = `
         <div class="mb-3">
@@ -431,10 +625,12 @@ function showProps(props) {
 
         let displayVal = val.value !== undefined ? val.value : val;
         if(typeof displayVal === 'number') displayVal = Math.round(displayVal * 100) / 100;
+        const safeVal = esc(String(displayVal));
+        const safeKey = esc(key);
 
         html += `<div class="flex justify-between border-b border-gray-100 py-1">
-            <span class="text-gray-500">${key}</span>
-            <span class="font-medium text-gray-800 text-right truncate pl-2 max-w-[150px]" title="${displayVal}">${displayVal}</span>
+            <span class="text-gray-500">${safeKey}</span>
+            <span class="font-medium text-gray-800 text-right truncate pl-2 max-w-[150px]" title="${safeVal}">${safeVal}</span>
         </div>`;
     }
     propContent.innerHTML = html;

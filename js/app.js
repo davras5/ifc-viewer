@@ -87,7 +87,8 @@ const ELEMENT_CATEGORIES = [
     WebIFC.IFCWINDOW, WebIFC.IFCDOOR, WebIFC.IFCCOLUMN, WebIFC.IFCBEAM,
     WebIFC.IFCFURNISHINGELEMENT, WebIFC.IFCBUILDINGELEMENTPROXY, WebIFC.IFCROOF,
     WebIFC.IFCSTAIR, WebIFC.IFCRAILING, WebIFC.IFCMEMBER, WebIFC.IFCCOVERING,
-    WebIFC.IFCFLOWTERMINAL, WebIFC.IFCFLOWSEGMENT
+    WebIFC.IFCFLOWTERMINAL, WebIFC.IFCFLOWSEGMENT,
+    WebIFC.IFCBUILDINGSTOREY, WebIFC.IFCSPACE
 ];
 
 const tablePanel = document.getElementById('table-panel');
@@ -176,6 +177,86 @@ onLegendChange((visible) => {
 
 // Init dashboard
 initDashboard();
+
+// Viewer toolbar
+const viewerToolbar = document.getElementById('viewer-toolbar');
+const tbViewerTools = document.getElementById('tb-viewer-tools');
+const vtMaterial = document.getElementById('vt-material');
+const vtGrid = document.getElementById('vt-grid');
+const vtPan = document.getElementById('vt-pan');
+
+function setViewerToolbarOpen(open) {
+    viewerToolbar.classList.toggle('hidden', !open);
+    tbViewerTools.classList.toggle('active', open);
+}
+
+tbViewerTools.addEventListener('click', () => {
+    setViewerToolbarOpen(viewerToolbar.classList.contains('hidden'));
+});
+document.getElementById('vt-close').addEventListener('click', () => {
+    setViewerToolbarOpen(false);
+});
+
+// Material toggle: cycles through Solid → X-ray → Wireframe
+let materialMode = 0; // 0=solid, 1=xray, 2=wireframe
+const materialModeIcons = ['fa-swatchbook', 'fa-eye', 'fa-border-none'];
+const materialModeTitles = ['Solid view', 'X-ray view', 'Wireframe view'];
+
+function applyMaterialMode() {
+    if (!ifcModel) return;
+    const mat = ifcModel.material;
+    const applyTo = Array.isArray(mat) ? mat : [mat];
+
+    for (const m of applyTo) {
+        switch (materialMode) {
+            case 0: // Solid
+                m.transparent = false;
+                m.opacity = 1;
+                m.wireframe = false;
+                m.depthWrite = true;
+                break;
+            case 1: // X-ray
+                m.transparent = true;
+                m.opacity = 0.3;
+                m.wireframe = false;
+                m.depthWrite = false;
+                break;
+            case 2: // Wireframe
+                m.transparent = false;
+                m.opacity = 1;
+                m.wireframe = true;
+                m.depthWrite = true;
+                break;
+        }
+        m.needsUpdate = true;
+    }
+
+    // Update button icon and state
+    const icon = vtMaterial.querySelector('i');
+    icon.className = `fa-solid ${materialModeIcons[materialMode]}`;
+    vtMaterial.title = materialModeTitles[materialMode];
+    vtMaterial.classList.toggle('active', materialMode !== 0);
+}
+
+vtMaterial.addEventListener('click', () => {
+    materialMode = (materialMode + 1) % 3;
+    applyMaterialMode();
+});
+
+vtGrid.addEventListener('click', () => {
+    const active = vtGrid.classList.toggle('active');
+    grid.visible = active;
+    axes.visible = active;
+});
+
+vtPan.addEventListener('click', () => {
+    const active = vtPan.classList.toggle('active');
+    if (active) {
+        controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
+    } else {
+        controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+    }
+});
 
 // Shared data for dashboard
 window.__ifcViewerData = { elements: [], psets: [] };
@@ -399,6 +480,10 @@ async function loadModel(url) {
         ifcModel = await ifcLoader.loadAsync(url);
         scene.add(ifcModel);
 
+        // Reset material mode to solid on new model
+        materialMode = 0;
+        applyMaterialMode();
+
         // Auto-center camera
         const box = new THREE.Box3().setFromObject(ifcModel);
         const center = box.getCenter(new THREE.Vector3());
@@ -434,6 +519,70 @@ async function loadModel(url) {
 }
 
 async function extractTableData(modelID) {
+    // Build storey and space maps: elementExpressID → name
+    const storeyMap = new Map(); // expressID → storey name
+    const spaceMap = new Map();  // expressID → space name
+
+    try {
+        // Get all spatial containment relationships
+        const rels = await ifcLoader.ifcManager.getAllItemsOfType(modelID, WebIFC.IFCRELCONTAINEDINSPATIALSTRUCTURE, true);
+        for (const rel of rels) {
+            const structure = rel.RelatingStructure;
+            if (!structure) continue;
+
+            // Resolve the spatial structure element
+            let structureProps;
+            try {
+                structureProps = await ifcLoader.ifcManager.getItemProperties(modelID, structure.value);
+            } catch (_) { continue; }
+
+            const structureName = structureProps?.Name?.value ?? '';
+            const structureType = structureProps?.constructor?.name ?? '';
+
+            const relatedElements = rel.RelatedElements || [];
+            for (const ref of relatedElements) {
+                const eid = ref.value;
+                if (structureType.includes('Storey') || structureType.includes('BuildingStorey')) {
+                    storeyMap.set(eid, structureName);
+                } else if (structureType.includes('Space')) {
+                    spaceMap.set(eid, structureName);
+                }
+            }
+        }
+
+        // Also get IfcSpace entities and map elements inside them
+        const spaceRels = await ifcLoader.ifcManager.getAllItemsOfType(modelID, WebIFC.IFCRELSPACEBOUNDARY, false)
+            .catch(() => []);
+        // IfcRelSpaceBoundary is less common; spatial containment above covers most cases
+    } catch (err) {
+        console.warn('Could not extract spatial structure:', err);
+    }
+
+    // Get storey info for elements via aggregation (elements in storeys via IfcRelAggregates)
+    try {
+        const aggRels = await ifcLoader.ifcManager.getAllItemsOfType(modelID, WebIFC.IFCRELAGGREGATES, true);
+        for (const rel of aggRels) {
+            const relating = rel.RelatingObject;
+            if (!relating) continue;
+
+            let relatingProps;
+            try {
+                relatingProps = await ifcLoader.ifcManager.getItemProperties(modelID, relating.value);
+            } catch (_) { continue; }
+
+            const relatingType = relatingProps?.constructor?.name ?? '';
+            if (!relatingType.includes('Storey') && !relatingType.includes('BuildingStorey')) continue;
+
+            const storeyName = relatingProps?.Name?.value ?? '';
+            const relatedObjects = rel.RelatedObjects || [];
+            for (const ref of relatedObjects) {
+                if (!storeyMap.has(ref.value)) {
+                    storeyMap.set(ref.value, storeyName);
+                }
+            }
+        }
+    } catch (_) { /* skip */ }
+
     const elements = [];
     const psets = [];
 
@@ -447,6 +596,8 @@ async function extractTableData(modelID) {
                 Name: el.Name?.value ?? '',
                 Type: typeName,
                 Tag: el.Tag?.value ?? '',
+                Level: storeyMap.get(el.expressID) ?? '',
+                Space: spaceMap.get(el.expressID) ?? '',
             });
 
             try {

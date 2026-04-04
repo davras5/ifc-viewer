@@ -72,6 +72,8 @@ const ELEMENT_COLS = [
   { key: "GlobalId", label: "GlobalId", cls: "col-e-gid" },
   { key: "Name", label: "Name", cls: "col-e-name" },
   { key: "Type", label: "Type", cls: "col-e-type" },
+  { key: "Level", label: "Level", cls: "col-e-level" },
+  { key: "Space", label: "Space", cls: "col-e-space" },
   { key: "Tag", label: "Tag", cls: "col-e-tag" },
 ];
 
@@ -974,7 +976,7 @@ function renderElements() {
   if (eSearch) {
     data = data.filter((el) => {
       const s =
-        `${el.expressID} ${el.GlobalId} ${el.Name} ${el.Type} ${el.Tag}`.toLowerCase();
+        `${el.expressID} ${el.GlobalId} ${el.Name} ${el.Type} ${el.Level} ${el.Space} ${el.Tag}`.toLowerCase();
       return s.includes(eSearch);
     });
   }

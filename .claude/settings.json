@@ -6,7 +6,13 @@
       "WebFetch(domain:json-render.dev)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:gridstackjs.com)",
-      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,6\\\\}\\\\|rgb\\\\|hsl\" /c/Users/DavidRasner/Documents/GitHub/ifc-viewer/css/main.css)"
+      "Bash(grep -n \"#[0-9a-fA-F]\\\\{3,6\\\\}\\\\|rgb\\\\|hsl\" /c/Users/DavidRasner/Documents/GitHub/ifc-viewer/css/main.css)",
+      "WebFetch(domain:ifcjs.github.io)",
+      "WebFetch(domain:unpkg.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "WebSearch",
+      "WebFetch(domain:app.unpkg.com)",
+      "WebFetch(domain:thatopen.github.io)"
     ]
   }
 }

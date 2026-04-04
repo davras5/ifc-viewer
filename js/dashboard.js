@@ -352,6 +352,8 @@ const COLUMNS = [
   { key: "GlobalId", label: "GlobalId" },
   { key: "Name", label: "Name" },
   { key: "Type", label: "Type" },
+  { key: "Level", label: "Level" },
+  { key: "Space", label: "Space" },
   { key: "Tag", label: "Tag" },
 ];
 

@@ -55,10 +55,13 @@
                 <!-- Toggle bar (top center) -->
                 <div id="toggle-bar" class="toggle-bar glass-panel" role="toolbar" aria-label="Panel toggles">
                     <button id="tb-controls" class="tb-btn active" title="Controls" aria-label="Toggle controls panel">
-                        <i class="fa-solid fa-wrench" aria-hidden="true"></i>
+                        <i class="fa-solid fa-upload" aria-hidden="true"></i>
                     </button>
                     <button id="tb-table" class="tb-btn" title="Table" aria-label="Toggle data table">
                         <i class="fa-solid fa-table" aria-hidden="true"></i>
+                    </button>
+                    <button id="tb-viewer-tools" class="tb-btn active" title="Viewer Tools" aria-label="Toggle viewer tools">
+                        <i class="fa-solid fa-screwdriver-wrench" aria-hidden="true"></i>
                     </button>
                     <button id="tb-dashboard" class="tb-btn" title="Dashboard" aria-label="Toggle dashboard">
                         <i class="fa-solid fa-chart-pie" aria-hidden="true"></i>
@@ -112,6 +115,25 @@
                     <i class="fa-solid fa-chevron-up tbl-toggle-arrow"></i>
                     <span>Table</span>
                 </button>
+
+                <!-- Viewer toolbar (bottom-left) -->
+                <div id="viewer-toolbar" class="viewer-toolbar glass-panel" role="toolbar" aria-label="Viewer tools">
+                    <button id="vt-material" class="tb-btn" title="Toggle materials" aria-label="Toggle original materials">
+                        <i class="fa-solid fa-swatchbook" aria-hidden="true"></i>
+                    </button>
+                    <button id="vt-grid" class="tb-btn active" title="Toggle grid" aria-label="Toggle grid visibility">
+                        <i class="fa-solid fa-border-all" aria-hidden="true"></i>
+                    </button>
+                    <button id="vt-pan" class="tb-btn" title="Pan mode" aria-label="Toggle pan mode">
+                        <i class="fa-solid fa-hand" aria-hidden="true"></i>
+                    </button>
+                    <button id="vt-measure" class="tb-btn" title="Measure (coming soon)" aria-label="Measure tool" disabled>
+                        <i class="fa-solid fa-ruler" aria-hidden="true"></i>
+                    </button>
+                    <button id="vt-close" class="tb-btn vt-close-btn" title="Close toolbar" aria-label="Close viewer toolbar">
+                        <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+                    </button>
+                </div>
 
                 <!-- Footer -->
                 <div class="absolute bottom-4 right-4 z-10">

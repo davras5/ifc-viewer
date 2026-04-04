@@ -65,7 +65,7 @@ async function initIFCEngine() {
 
 // Keyboard navigation (WASD + arrows)
 const keysPressed = new Set();
-const moveSpeed = 0.3;
+let moveSpeed = 0.3;
 
 window.addEventListener('keydown', (e) => {
     // Don't capture keys when typing in inputs
@@ -438,6 +438,16 @@ async function extractAndApplyMaterials(modelID) {
 
         if (colorToIds.size === 0) return;
 
+        // Exclude IfcOpeningElement IDs — voids should not be rendered as material subsets
+        const openingIds = new Set(
+            await ifcLoader.ifcManager.getAllItemsOfType(modelID, WebIFC.IFCOPENINGELEMENT, false).catch(() => [])
+        );
+        if (openingIds.size > 0) {
+            for (const [key, ids] of colorToIds) {
+                colorToIds.set(key, ids.filter(id => !openingIds.has(id)));
+            }
+        }
+
         // Step 4: Create subsets per color
         for (const [key, ids] of colorToIds) {
             const [r, g, b, t] = key.split(',').map(Number);
@@ -502,38 +512,48 @@ async function resolveColor(modelID, styleId) {
     return null;
 }
 
-async function resolveMaterialColor(modelID, matId, colorMap) {
-    // Direct match
+async function resolveMaterialColor(modelID, matId, colorMap, visited = new Set()) {
+    if (visited.has(matId)) return null; // circular reference protection
+    visited.add(matId);
+
     if (colorMap.has(matId)) return colorMap.get(matId);
 
     const obj = await ifcLoader.ifcManager.getItemProperties(modelID, matId, false);
-    const typeName = obj?.constructor?.name ?? '';
 
     // IfcMaterialLayerSetUsage → ForLayerSet → IfcMaterialLayerSet
-    if (typeName.includes('LayerSetUsage') && obj?.ForLayerSet?.value) {
-        return resolveMaterialColor(modelID, obj.ForLayerSet.value, colorMap);
+    if (obj?.ForLayerSet?.value) {
+        return resolveMaterialColor(modelID, obj.ForLayerSet.value, colorMap, visited);
     }
 
-    // IfcMaterialLayerSet → MaterialLayers[] → IfcMaterialLayer → Material
+    // IfcMaterialLayerSet → MaterialLayers[] → Material
     if (obj?.MaterialLayers) {
         for (const ref of obj.MaterialLayers) {
             const layer = await ifcLoader.ifcManager.getItemProperties(modelID, ref.value, false);
-            const innerMatRef = layer?.Material?.value;
-            if (innerMatRef) {
-                const c = colorMap.get(innerMatRef);
-                if (c) return c;
+            if (layer?.Material?.value && colorMap.has(layer.Material.value)) {
+                return colorMap.get(layer.Material.value);
             }
         }
     }
 
-    // IfcMaterialConstituentSet → MaterialConstituents[] → IfcMaterialConstituent → Material
+    // IfcMaterialProfileSet / IfcMaterialProfileSetUsage → MaterialProfiles[] → Material
+    if (obj?.ForProfileSet?.value) {
+        return resolveMaterialColor(modelID, obj.ForProfileSet.value, colorMap, visited);
+    }
+    if (obj?.MaterialProfiles) {
+        for (const ref of obj.MaterialProfiles) {
+            const profile = await ifcLoader.ifcManager.getItemProperties(modelID, ref.value, false);
+            if (profile?.Material?.value && colorMap.has(profile.Material.value)) {
+                return colorMap.get(profile.Material.value);
+            }
+        }
+    }
+
+    // IfcMaterialConstituentSet → MaterialConstituents[] → Material
     if (obj?.MaterialConstituents) {
         for (const ref of obj.MaterialConstituents) {
             const constituent = await ifcLoader.ifcManager.getItemProperties(modelID, ref.value, false);
-            const innerMatRef = constituent?.Material?.value;
-            if (innerMatRef) {
-                const c = colorMap.get(innerMatRef);
-                if (c) return c;
+            if (constituent?.Material?.value && colorMap.has(constituent.Material.value)) {
+                return colorMap.get(constituent.Material.value);
             }
         }
     }
@@ -541,8 +561,7 @@ async function resolveMaterialColor(modelID, matId, colorMap) {
     // IfcMaterialList → Materials[]
     if (obj?.Materials) {
         for (const ref of obj.Materials) {
-            const c = colorMap.get(ref.value);
-            if (c) return c;
+            if (colorMap.has(ref.value)) return colorMap.get(ref.value);
         }
     }
 
@@ -878,6 +897,8 @@ function setStatus(msg, type='loading') {
 }
 
 async function loadModel(url) {
+    if (fpsMode) exitFpsMode();
+
     if(ifcModel) {
         lastColorConfig = null;
         currentFilteredIDs = null;
@@ -919,6 +940,9 @@ async function loadModel(url) {
         camera.position.set(center.x + maxDim, center.y + maxDim / 2, center.z + maxDim);
         camera.lookAt(center);
         controls.update();
+
+        // Scale WASD speed to ~0.5% of model dimension per frame
+        moveSpeed = Math.max(0.05, maxDim * 0.005);
 
         // Extract elements + property sets for table
         showLoading('Extracting element data...');

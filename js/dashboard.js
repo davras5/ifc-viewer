@@ -268,13 +268,13 @@ function renderDonut(el, w, data) {
     if (idx < 0) {
       ds.backgroundColor = [...donutDefault];
       ds.offset = 0;
-      ds.borderWidth = 1;
-      ds.borderColor = "var(--color-surface)";
+      ds.borderWidth = 0;
+      ds.borderColor = "transparent";
     } else {
       ds.backgroundColor = donutDefault.map((c, i) => i === idx ? c : donutFaded[i]);
       ds.offset = donutDefault.map((_, i) => i === idx ? 12 : 0);
-      ds.borderWidth = donutDefault.map((_, i) => i === idx ? 3 : 1);
-      ds.borderColor = donutDefault.map((c, i) => i === idx ? "#fff" : "rgba(255,255,255,.3)");
+      ds.borderWidth = donutDefault.map((_, i) => i === idx ? 3 : 0);
+      ds.borderColor = donutDefault.map((c, i) => i === idx ? "#fff" : "transparent");
     }
     chart.update("none");
   }
@@ -286,7 +286,7 @@ function renderDonut(el, w, data) {
       datasets: [{
         data: sorted.map(([, v]) => v),
         backgroundColor: donutDefault,
-        borderWidth: 1,
+        borderWidth: 0,
       }],
     },
     options: {

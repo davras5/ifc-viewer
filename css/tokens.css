@@ -1,0 +1,23 @@
+/* Design tokens */
+:root {
+    --color-bg: #222;
+    --color-glass-bg: rgba(255, 255, 255, 0.95);
+    --color-glass-border: rgba(255, 255, 255, 0.2);
+    --color-glass-shadow: rgba(31, 38, 135, 0.37);
+    --color-footer-bg: rgba(30, 30, 30, 0.8);
+    --color-footer-border: rgba(255, 255, 255, 0.1);
+    --color-loader-track: #f3f3f3;
+    --color-loader-spin: #3b82f6;
+    --loader-size: 12px;
+
+    /* Table panel */
+    --tbl-bg: #fff;
+    --tbl-border: #e5e7eb;
+    --tbl-header-bg: #f9fafb;
+    --tbl-row-hover: #f3f4f6;
+    --tbl-row-active: #dbeafe;
+    --tbl-accent: #3b82f6;
+    --tbl-text: #1f2937;
+    --tbl-text-muted: #6b7280;
+    --tbl-height: 280px;
+}

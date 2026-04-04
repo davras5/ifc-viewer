@@ -54,7 +54,7 @@ let currentSelection = { subset: null };
 
 async function initIFCEngine() {
     if (isEngineInitialized) return;
-    ifcLoader.ifcManager.setWasmPath("https://unpkg.com/web-ifc@0.0.66/");
+    ifcLoader.ifcManager.setWasmPath("https://unpkg.com/web-ifc@0.0.77/");
     await ifcLoader.ifcManager.applyWebIfcConfig({
         COORDINATE_TO_ORIGIN: true,
         USE_FAST_BOOLS: true
@@ -63,8 +63,75 @@ async function initIFCEngine() {
     isEngineInitialized = true;
 }
 
+// Keyboard navigation (WASD + arrows)
+const keysPressed = new Set();
+const moveSpeed = 0.3;
+
+window.addEventListener('keydown', (e) => {
+    // Don't capture keys when typing in inputs
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+    keysPressed.add(e.key.toLowerCase());
+});
+window.addEventListener('keyup', (e) => {
+    keysPressed.delete(e.key.toLowerCase());
+});
+
+const _moveDir = new THREE.Vector3();
+const _sideDir = new THREE.Vector3();
+
+function applyKeyboardMovement() {
+    if (keysPressed.size === 0) return;
+
+    // Get camera forward direction (projected to horizontal plane)
+    camera.getWorldDirection(_moveDir);
+    _moveDir.y = 0;
+    _moveDir.normalize();
+
+    // Side direction (perpendicular)
+    _sideDir.crossVectors(camera.up, _moveDir).normalize();
+
+    let moved = false;
+
+    // Forward/back: W/S or ArrowUp/ArrowDown
+    if (keysPressed.has('w') || keysPressed.has('arrowup')) {
+        camera.position.addScaledVector(_moveDir, moveSpeed);
+        controls.target.addScaledVector(_moveDir, moveSpeed);
+        moved = true;
+    }
+    if (keysPressed.has('s') || keysPressed.has('arrowdown')) {
+        camera.position.addScaledVector(_moveDir, -moveSpeed);
+        controls.target.addScaledVector(_moveDir, -moveSpeed);
+        moved = true;
+    }
+
+    // Strafe left/right: A/D or ArrowLeft/ArrowRight
+    if (keysPressed.has('a') || keysPressed.has('arrowleft')) {
+        camera.position.addScaledVector(_sideDir, moveSpeed);
+        controls.target.addScaledVector(_sideDir, moveSpeed);
+        moved = true;
+    }
+    if (keysPressed.has('d') || keysPressed.has('arrowright')) {
+        camera.position.addScaledVector(_sideDir, -moveSpeed);
+        controls.target.addScaledVector(_sideDir, -moveSpeed);
+        moved = true;
+    }
+
+    // Up/down: Q/E
+    if (keysPressed.has('q')) {
+        camera.position.y -= moveSpeed;
+        controls.target.y -= moveSpeed;
+        moved = true;
+    }
+    if (keysPressed.has('e')) {
+        camera.position.y += moveSpeed;
+        controls.target.y += moveSpeed;
+        moved = true;
+    }
+}
+
 function animate() {
     requestAnimationFrame(animate);
+    applyKeyboardMovement();
     controls.update();
     renderer.render(scene, camera);
 }
@@ -87,7 +154,8 @@ const ELEMENT_CATEGORIES = [
     WebIFC.IFCWINDOW, WebIFC.IFCDOOR, WebIFC.IFCCOLUMN, WebIFC.IFCBEAM,
     WebIFC.IFCFURNISHINGELEMENT, WebIFC.IFCBUILDINGELEMENTPROXY, WebIFC.IFCROOF,
     WebIFC.IFCSTAIR, WebIFC.IFCRAILING, WebIFC.IFCMEMBER, WebIFC.IFCCOVERING,
-    WebIFC.IFCFLOWTERMINAL, WebIFC.IFCFLOWSEGMENT,
+    WebIFC.IFCFLOWTERMINAL, WebIFC.IFCFLOWSEGMENT, WebIFC.IFCOPENINGELEMENT,
+    WebIFC.IFCPLATE, WebIFC.IFCCURTAINWALL,
     WebIFC.IFCBUILDINGSTOREY, WebIFC.IFCSPACE
 ];
 
@@ -197,31 +265,32 @@ document.getElementById('vt-close').addEventListener('click', () => {
     setViewerToolbarOpen(false);
 });
 
-// Material toggle: cycles through Solid → X-ray → Wireframe
-let materialMode = 0; // 0=solid, 1=xray, 2=wireframe
-const materialModeIcons = ['fa-swatchbook', 'fa-eye', 'fa-border-none'];
-const materialModeTitles = ['Solid view', 'X-ray view', 'Wireframe view'];
+// View modes: 0=solid, 1=IFC materials, 2=xray, 3=wireframe
+let materialMode = 1;
+const materialModeIcons = ['fa-swatchbook', 'fa-fill-drip', 'fa-eye', 'fa-border-none'];
 
 function applyMaterialMode() {
     if (!ifcModel) return;
     const mat = ifcModel.material;
     const applyTo = Array.isArray(mat) ? mat : [mat];
 
+    // Modes: 0=solid, 1=IFC materials, 2=xray, 3=wireframe
     for (const m of applyTo) {
         switch (materialMode) {
-            case 0: // Solid
+            case 0: // Solid (default gray)
+            case 1: // IFC materials (subsets handle the color, base stays solid)
                 m.transparent = false;
                 m.opacity = 1;
                 m.wireframe = false;
                 m.depthWrite = true;
                 break;
-            case 1: // X-ray
+            case 2: // X-ray
                 m.transparent = true;
                 m.opacity = 0.3;
                 m.wireframe = false;
                 m.depthWrite = false;
                 break;
-            case 2: // Wireframe
+            case 3: // Wireframe
                 m.transparent = false;
                 m.opacity = 1;
                 m.wireframe = true;
@@ -231,16 +300,316 @@ function applyMaterialMode() {
         m.needsUpdate = true;
     }
 
-    // Update button icon and state
+    // Update button icon
     const icon = vtMaterial.querySelector('i');
     icon.className = `fa-solid ${materialModeIcons[materialMode]}`;
-    vtMaterial.title = materialModeTitles[materialMode];
     vtMaterial.classList.toggle('active', materialMode !== 0);
 }
 
-vtMaterial.addEventListener('click', () => {
-    materialMode = (materialMode + 1) % 3;
-    applyMaterialMode();
+// IFC material color subsets
+const ifcMaterialSubsets = [];
+let ifcMaterialsLoaded = false;
+
+async function extractAndApplyMaterials(modelID) {
+    clearIfcMaterialSubsets();
+    ifcMaterialsLoaded = false;
+
+    try {
+        const materialColorMap = new Map();
+
+        // Step 1: Build surface style → color map
+        const surfaceStyleIds = await ifcLoader.ifcManager.getAllItemsOfType(modelID, WebIFC.IFCSURFACESTYLE, false);
+
+        const styleColorMap = new Map(); // surfaceStyleID → {r,g,b}
+        for (const ssId of (surfaceStyleIds || [])) {
+            const ss = await ifcLoader.ifcManager.getItemProperties(modelID, ssId, false);
+            const innerRefs = ss?.Styles || [];
+            for (const ref of innerRefs) {
+                const inner = await ifcLoader.ifcManager.getItemProperties(modelID, ref.value, false);
+                const rgb = await extractRgb(modelID, inner?.SurfaceColour);
+                if (rgb) {
+                    // Extract transparency (0=opaque, 1=fully transparent in IFC)
+                    let t = inner?.Transparency;
+                    if (t && typeof t === 'object') t = t.value;
+                    rgb.transparency = (typeof t === 'number' && t > 0) ? t : 0;
+                    styleColorMap.set(ssId, rgb);
+                    break;
+                }
+            }
+        }
+        // Step 2: Build material → color via IfcMaterialDefinitionRepresentation
+        const matDefRepIds = await ifcLoader.ifcManager.getAllItemsOfType(modelID, WebIFC.IFCMATERIALDEFINITIONREPRESENTATION, false).catch(() => []);
+
+        for (const mdrId of (matDefRepIds || [])) {
+            const mdr = await ifcLoader.ifcManager.getItemProperties(modelID, mdrId, false);
+            const matRef = mdr?.RepresentedMaterial?.value;
+            if (!matRef) continue;
+
+            const representations = mdr?.Representations || [];
+            for (const repRef of representations) {
+                const rep = await ifcLoader.ifcManager.getItemProperties(modelID, repRef.value, false);
+                const items = rep?.Items || [];
+                for (const itemRef of items) {
+                    const item = await ifcLoader.ifcManager.getItemProperties(modelID, itemRef.value, false);
+                    // This should be an IfcStyledItem with Styles
+                    const styles = item?.Styles || [];
+                    for (const sRef of styles) {
+                        // Could be IfcPresentationStyleAssignment or direct IfcSurfaceStyle
+                        const color = await resolveColor(modelID, sRef.value);
+                        if (color) { materialColorMap.set(matRef, color); break; }
+                    }
+                    if (materialColorMap.has(matRef)) break;
+                }
+                if (materialColorMap.has(matRef)) break;
+            }
+        }
+
+        // Fallback: if no MaterialDefinitionRepresentation, try matching by name
+        if (materialColorMap.size === 0 && styleColorMap.size > 0) {
+            // Fallback: match materials to surface styles by name
+            const materialIds = await ifcLoader.ifcManager.getAllItemsOfType(modelID, WebIFC.IFCMATERIAL, false);
+            const styleNameColorMap = new Map();
+            for (const [ssId, color] of styleColorMap) {
+                const ss = await ifcLoader.ifcManager.getItemProperties(modelID, ssId, false);
+                const name = ss?.Name?.value ?? '';
+                if (name) styleNameColorMap.set(name, color);
+            }
+            for (const matId of (materialIds || [])) {
+                const mat = await ifcLoader.ifcManager.getItemProperties(modelID, matId, false);
+                const matName = mat?.Name?.value ?? '';
+                if (matName && styleNameColorMap.has(matName)) {
+                    const color = { ...styleNameColorMap.get(matName) };
+                    // Heuristic: force transparency for glass/glazing materials
+                    const ln = matName.toLowerCase();
+                    if (color.transparency === 0 && (ln.includes('glass') || ln.includes('glazing') || ln.includes('transparent') || ln.includes('glas'))) {
+                        color.transparency = 0.6;
+                    }
+                    materialColorMap.set(matId, color);
+                }
+            }
+            for (const matId of (materialIds || [])) {
+                const mat = await ifcLoader.ifcManager.getItemProperties(modelID, matId, false);
+                // Try getMaterialsProperties for HasRepresentation
+                const hasRep = mat?.HasRepresentation;
+                if (hasRep) {
+                    for (const repRef of (Array.isArray(hasRep) ? hasRep : [hasRep])) {
+                        const repId = repRef?.value ?? repRef;
+                        if (!repId) continue;
+                        const rep = await ifcLoader.ifcManager.getItemProperties(modelID, repId, false);
+                        const reps = rep?.Representations || [];
+                        for (const rRef of reps) {
+                            const r = await ifcLoader.ifcManager.getItemProperties(modelID, rRef.value, false);
+                            for (const iRef of (r?.Items || [])) {
+                                const si = await ifcLoader.ifcManager.getItemProperties(modelID, iRef.value, false);
+                                for (const sRef of (si?.Styles || [])) {
+                                    const color = await resolveColor(modelID, sRef.value);
+                                    if (color) { materialColorMap.set(matId, color); break; }
+                                }
+                                if (materialColorMap.has(matId)) break;
+                            }
+                            if (materialColorMap.has(matId)) break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (materialColorMap.size === 0 && styleColorMap.size === 0) return;
+
+        // Step 3: Map elements to colors via IfcRelAssociatesMaterial
+        const colorToIds = new Map();
+        const matRelIds = await ifcLoader.ifcManager.getAllItemsOfType(modelID, WebIFC.IFCRELASSOCIATESMATERIAL, false);
+
+        for (const relId of (matRelIds || [])) {
+            const rel = await ifcLoader.ifcManager.getItemProperties(modelID, relId, false);
+            const matUsageRef = rel?.RelatingMaterial?.value;
+            if (!matUsageRef) continue;
+
+            let color = await resolveMaterialColor(modelID, matUsageRef, materialColorMap);
+            if (!color) continue;
+
+            const key = `${color.r},${color.g},${color.b},${color.transparency ?? 0}`;
+            const elements = rel?.RelatedObjects || [];
+            for (const elRef of elements) {
+                if (!colorToIds.has(key)) colorToIds.set(key, []);
+                colorToIds.get(key).push(elRef.value);
+            }
+        }
+
+        if (colorToIds.size === 0) return;
+
+        // Step 4: Create subsets per color
+        for (const [key, ids] of colorToIds) {
+            const [r, g, b, t] = key.split(',').map(Number);
+            const hex = (Math.round(r * 255) << 16) | (Math.round(g * 255) << 8) | Math.round(b * 255);
+            const opacity = 1 - (t || 0);
+            const isTransparent = opacity < 0.95;
+            const mat = new THREE.MeshLambertMaterial({
+                color: hex,
+                transparent: isTransparent,
+                opacity,
+                depthWrite: !isTransparent,
+                side: isTransparent ? THREE.DoubleSide : THREE.FrontSide,
+            });
+
+            const subset = ifcLoader.ifcManager.createSubset({
+                modelID,
+                ids,
+                material: mat,
+                scene,
+                removePrevious: false,
+            });
+            ifcMaterialSubsets.push({ material: mat, subset });
+        }
+
+        ifcMaterialsLoaded = true;
+
+        // Show/hide based on current material mode
+        const showMats = materialMode === 1;
+        ifcMaterialSubsets.forEach(({ subset }) => { if (subset) subset.visible = showMats; });
+
+    } catch (err) {
+        console.warn('Material extraction failed:', err);
+    }
+}
+
+async function resolveColor(modelID, styleId) {
+    try {
+        const style = await ifcLoader.ifcManager.getItemProperties(modelID, styleId, false);
+        const typeName = style?.constructor?.name ?? '';
+
+        if (typeName.includes('SurfaceStyle') && !typeName.includes('Rendering') && !typeName.includes('Shading')) {
+            for (const isRef of (style.Styles || [])) {
+                const inner = await ifcLoader.ifcManager.getItemProperties(modelID, isRef.value, false);
+                const innerType = inner?.constructor?.name ?? '';
+                if (innerType.includes('SurfaceStyleRendering') || innerType.includes('SurfaceStyleShading')) {
+                    return await extractRgb(modelID, inner.SurfaceColour);
+                }
+            }
+        }
+
+        if (typeName.includes('PresentationStyleAssignment') || typeName.includes('PresentationStyle')) {
+            for (const asRef of (style.Styles || [])) {
+                const color = await resolveColor(modelID, asRef.value);
+                if (color) return color;
+            }
+        }
+
+        if (typeName.includes('Rendering') || typeName.includes('Shading')) {
+            return await extractRgb(modelID, style.SurfaceColour);
+        }
+    } catch (_) { /* skip */ }
+    return null;
+}
+
+async function resolveMaterialColor(modelID, matId, colorMap) {
+    // Direct match
+    if (colorMap.has(matId)) return colorMap.get(matId);
+
+    const obj = await ifcLoader.ifcManager.getItemProperties(modelID, matId, false);
+    const typeName = obj?.constructor?.name ?? '';
+
+    // IfcMaterialLayerSetUsage → ForLayerSet → IfcMaterialLayerSet
+    if (typeName.includes('LayerSetUsage') && obj?.ForLayerSet?.value) {
+        return resolveMaterialColor(modelID, obj.ForLayerSet.value, colorMap);
+    }
+
+    // IfcMaterialLayerSet → MaterialLayers[] → IfcMaterialLayer → Material
+    if (obj?.MaterialLayers) {
+        for (const ref of obj.MaterialLayers) {
+            const layer = await ifcLoader.ifcManager.getItemProperties(modelID, ref.value, false);
+            const innerMatRef = layer?.Material?.value;
+            if (innerMatRef) {
+                const c = colorMap.get(innerMatRef);
+                if (c) return c;
+            }
+        }
+    }
+
+    // IfcMaterialConstituentSet → MaterialConstituents[] → IfcMaterialConstituent → Material
+    if (obj?.MaterialConstituents) {
+        for (const ref of obj.MaterialConstituents) {
+            const constituent = await ifcLoader.ifcManager.getItemProperties(modelID, ref.value, false);
+            const innerMatRef = constituent?.Material?.value;
+            if (innerMatRef) {
+                const c = colorMap.get(innerMatRef);
+                if (c) return c;
+            }
+        }
+    }
+
+    // IfcMaterialList → Materials[]
+    if (obj?.Materials) {
+        for (const ref of obj.Materials) {
+            const c = colorMap.get(ref.value);
+            if (c) return c;
+        }
+    }
+
+    return null;
+}
+
+async function extractRgb(modelID, colourRef) {
+    if (!colourRef) return null;
+
+    // If it's a Handle/reference, resolve it first
+    if (colourRef.value !== undefined && colourRef.Red === undefined) {
+        try {
+            colourRef = await ifcLoader.ifcManager.getItemProperties(modelID, colourRef.value, false);
+        } catch (_) { return null; }
+    }
+
+    const r = colourRef.Red?.value ?? colourRef.Red ?? null;
+    const g = colourRef.Green?.value ?? colourRef.Green ?? null;
+    const b = colourRef.Blue?.value ?? colourRef.Blue ?? null;
+    if (r === null || g === null || b === null) return null;
+    return { r, g, b };
+}
+
+
+
+function clearIfcMaterialSubsets() {
+    if (!ifcModel) return;
+    for (const { material } of ifcMaterialSubsets) {
+        ifcLoader.ifcManager.removeSubset(ifcModel.modelID, material);
+        material.dispose();
+    }
+    ifcMaterialSubsets.length = 0;
+    ifcMaterialsLoaded = false;
+}
+
+// View mode dropdown
+const vtMaterialMenu = document.getElementById('vt-material-menu');
+
+vtMaterial.addEventListener('click', (e) => {
+    e.stopPropagation();
+    vtMaterialMenu.classList.toggle('show');
+});
+
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('#vt-material-menu') && !e.target.closest('#vt-material')) {
+        vtMaterialMenu.classList.remove('show');
+    }
+});
+
+vtMaterialMenu.querySelectorAll('.vt-dropdown-item').forEach((btn) => {
+    btn.addEventListener('click', () => {
+        materialMode = parseInt(btn.dataset.mode, 10);
+
+        // Update active state in menu
+        vtMaterialMenu.querySelectorAll('.vt-dropdown-item').forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        // Show/hide IFC material subsets
+        if (materialMode === 1 && ifcMaterialsLoaded) {
+            ifcMaterialSubsets.forEach(({ subset }) => { if (subset) subset.visible = true; });
+        } else {
+            ifcMaterialSubsets.forEach(({ subset }) => { if (subset) subset.visible = false; });
+        }
+
+        applyMaterialMode();
+        vtMaterialMenu.classList.remove('show');
+    });
 });
 
 vtGrid.addEventListener('click', () => {
@@ -250,12 +619,61 @@ vtGrid.addEventListener('click', () => {
 });
 
 vtPan.addEventListener('click', () => {
+    if (fpsMode) exitFpsMode();
     const active = vtPan.classList.toggle('active');
     if (active) {
         controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
     } else {
         controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
     }
+});
+
+// First-person navigation mode
+const vtFps = document.getElementById('vt-fps');
+let fpsMode = false;
+const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+const FPS_LOOK_SPEED = 0.002;
+
+function enterFpsMode() {
+    fpsMode = true;
+    vtFps.classList.add('active');
+    vtPan.classList.remove('active');
+    controls.enabled = false;
+    container.requestPointerLock();
+}
+
+function exitFpsMode() {
+    fpsMode = false;
+    vtFps.classList.remove('active');
+    controls.enabled = true;
+    controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+    if (document.pointerLockElement) document.exitPointerLock();
+    // Re-sync orbit target to where we're looking
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    controls.target.copy(camera.position).addScaledVector(dir, 10);
+}
+
+vtFps.addEventListener('click', () => {
+    if (fpsMode) { exitFpsMode(); } else { enterFpsMode(); }
+});
+
+// Exit FPS on Escape or pointer lock loss
+document.addEventListener('pointerlockchange', () => {
+    if (!document.pointerLockElement && fpsMode) {
+        exitFpsMode();
+    }
+});
+
+// Mouse look in FPS mode
+document.addEventListener('mousemove', (e) => {
+    if (!fpsMode || !document.pointerLockElement) return;
+
+    euler.setFromQuaternion(camera.quaternion);
+    euler.y -= e.movementX * FPS_LOOK_SPEED;
+    euler.x -= e.movementY * FPS_LOOK_SPEED;
+    euler.x = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, euler.x));
+    camera.quaternion.setFromEuler(euler);
 });
 
 // Shared data for dashboard
@@ -385,8 +803,11 @@ function applyFilterSubsets(filterData) {
         if (ghostSubset) ghostSubset.raycast = () => {};
     }
 
-    // Re-apply color subsets with only visible IDs
+    // Re-apply color-by subsets with only visible IDs
     if (lastColorConfig) applyColorSubsets(lastColorConfig);
+
+    // Hide IFC material subsets during filtering (they cover all elements, not just filtered)
+    ifcMaterialSubsets.forEach(({ subset }) => { if (subset) subset.visible = false; });
 }
 
 function clearFilterSubsets() {
@@ -405,6 +826,10 @@ function clearFilterSubsets() {
         currentFilteredIDs = null;
         // Re-apply full color subsets (unfiltered)
         if (lastColorConfig) applyColorSubsets(lastColorConfig);
+        // Restore IFC material subsets if in materials mode
+        if (materialMode === 1 && ifcMaterialsLoaded) {
+            ifcMaterialSubsets.forEach(({ subset }) => { if (subset) subset.visible = true; });
+        }
     }
 }
 
@@ -458,7 +883,7 @@ async function loadModel(url) {
         currentFilteredIDs = null;
         clearColorSubsets();
         clearFilterSubsets();
-        // Dispose cached materials
+        clearIfcMaterialSubsets();
         for (const mat of materialCache.values()) mat.dispose();
         materialCache.clear();
         resetColorBy();
@@ -481,7 +906,7 @@ async function loadModel(url) {
         scene.add(ifcModel);
 
         // Reset material mode to solid on new model
-        materialMode = 0;
+        materialMode = 1;
         applyMaterialMode();
 
         // Auto-center camera
@@ -504,6 +929,11 @@ async function loadModel(url) {
         syncTableButton();
         window.__ifcViewerData = { elements, psets };
         refreshDashboard();
+
+        // Extract and apply IFC material colors
+        showLoading('Applying materials...');
+        await extractAndApplyMaterials(ifcModel.modelID);
+
         hideLoading();
 
         setStatus(`<b>Loaded!</b><br/>~${totalCount} Elements`, 'success');
@@ -519,66 +949,39 @@ async function loadModel(url) {
 }
 
 async function extractTableData(modelID) {
-    // Build storey and space maps: elementExpressID → name
-    const storeyMap = new Map(); // expressID → storey name
-    const spaceMap = new Map();  // expressID → space name
+    // Build storey map: elementExpressID → storey name
+    const storeyMap = new Map();
 
     try {
-        // Get all spatial containment relationships
         const rels = await ifcLoader.ifcManager.getAllItemsOfType(modelID, WebIFC.IFCRELCONTAINEDINSPATIALSTRUCTURE, true);
         for (const rel of rels) {
             const structure = rel.RelatingStructure;
             if (!structure) continue;
-
-            // Resolve the spatial structure element
-            let structureProps;
-            try {
-                structureProps = await ifcLoader.ifcManager.getItemProperties(modelID, structure.value);
-            } catch (_) { continue; }
-
-            const structureName = structureProps?.Name?.value ?? '';
-            const structureType = structureProps?.constructor?.name ?? '';
-
-            const relatedElements = rel.RelatedElements || [];
-            for (const ref of relatedElements) {
-                const eid = ref.value;
-                if (structureType.includes('Storey') || structureType.includes('BuildingStorey')) {
-                    storeyMap.set(eid, structureName);
-                } else if (structureType.includes('Space')) {
-                    spaceMap.set(eid, structureName);
-                }
+            let sp;
+            try { sp = await ifcLoader.ifcManager.getItemProperties(modelID, structure.value); }
+            catch (_) { continue; }
+            const sType = sp?.constructor?.name ?? '';
+            if (!sType.includes('Storey') && !sType.includes('BuildingStorey')) continue;
+            const sName = sp?.Name?.value ?? '';
+            for (const ref of (rel.RelatedElements || [])) {
+                storeyMap.set(ref.value, sName);
             }
         }
+    } catch (err) { console.warn('Spatial structure extraction failed:', err); }
 
-        // Also get IfcSpace entities and map elements inside them
-        const spaceRels = await ifcLoader.ifcManager.getAllItemsOfType(modelID, WebIFC.IFCRELSPACEBOUNDARY, false)
-            .catch(() => []);
-        // IfcRelSpaceBoundary is less common; spatial containment above covers most cases
-    } catch (err) {
-        console.warn('Could not extract spatial structure:', err);
-    }
-
-    // Get storey info for elements via aggregation (elements in storeys via IfcRelAggregates)
     try {
         const aggRels = await ifcLoader.ifcManager.getAllItemsOfType(modelID, WebIFC.IFCRELAGGREGATES, true);
         for (const rel of aggRels) {
             const relating = rel.RelatingObject;
             if (!relating) continue;
-
-            let relatingProps;
-            try {
-                relatingProps = await ifcLoader.ifcManager.getItemProperties(modelID, relating.value);
-            } catch (_) { continue; }
-
-            const relatingType = relatingProps?.constructor?.name ?? '';
-            if (!relatingType.includes('Storey') && !relatingType.includes('BuildingStorey')) continue;
-
-            const storeyName = relatingProps?.Name?.value ?? '';
-            const relatedObjects = rel.RelatedObjects || [];
-            for (const ref of relatedObjects) {
-                if (!storeyMap.has(ref.value)) {
-                    storeyMap.set(ref.value, storeyName);
-                }
+            let rp;
+            try { rp = await ifcLoader.ifcManager.getItemProperties(modelID, relating.value); }
+            catch (_) { continue; }
+            const rType = rp?.constructor?.name ?? '';
+            if (!rType.includes('Storey') && !rType.includes('BuildingStorey')) continue;
+            const sName = rp?.Name?.value ?? '';
+            for (const ref of (rel.RelatedObjects || [])) {
+                if (!storeyMap.has(ref.value)) storeyMap.set(ref.value, sName);
             }
         }
     } catch (_) { /* skip */ }
@@ -590,35 +993,88 @@ async function extractTableData(modelID) {
         const items = await ifcLoader.ifcManager.getAllItemsOfType(modelID, cat, true);
         for (const el of items) {
             const typeName = el.constructor.name.replace('Ifc', '');
-            elements.push({
-                expressID: el.expressID,
-                GlobalId: el.GlobalId?.value ?? '',
-                Name: el.Name?.value ?? '',
-                Type: typeName,
-                Tag: el.Tag?.value ?? '',
-                Level: storeyMap.get(el.expressID) ?? '',
-                Space: spaceMap.get(el.expressID) ?? '',
-            });
+            const elName = el.Name?.value ?? '';
+
+            // Base quantities for this element
+            let area = '', volume = '', length = '';
 
             try {
                 const propSets = await ifcLoader.ifcManager.getPropertySets(modelID, el.expressID, true);
                 for (const ps of propSets) {
-                    if (!ps.HasProperties) continue;
                     const psetName = ps.Name?.value ?? 'Unknown';
-                    for (const prop of ps.HasProperties) {
-                        if (!prop.Name?.value || !prop.NominalValue) continue;
-                        let val = prop.NominalValue.value;
-                        if (typeof val === 'number') val = parseFloat(val.toFixed(3));
-                        psets.push({
-                            expressID: el.expressID,
-                            ElementName: el.Name?.value ?? '',
-                            PSetName: psetName,
-                            Property: prop.Name.value,
-                            Value: val,
-                        });
+
+                    // Standard property sets (HasProperties)
+                    if (ps.HasProperties) {
+                        for (const prop of ps.HasProperties) {
+                            if (!prop.Name?.value || !prop.NominalValue) continue;
+                            let val = prop.NominalValue.value;
+                            if (typeof val === 'number') val = parseFloat(val.toFixed(3));
+                            psets.push({
+                                expressID: el.expressID,
+                                ElementName: elName,
+                                PSetName: psetName,
+                                Property: prop.Name.value,
+                                Value: val,
+                            });
+                        }
+                    }
+
+                    // Quantity sets (Quantities) — base quantities
+                    if (ps.Quantities) {
+                        for (const q of ps.Quantities) {
+                            if (!q.Name?.value) continue;
+                            const qName = q.Name.value;
+                            const qType = q.constructor?.name ?? '';
+
+                            // Extract the value based on quantity type
+                            let val = null;
+                            if (q.LengthValue !== undefined) val = q.LengthValue?.value ?? q.LengthValue;
+                            else if (q.AreaValue !== undefined) val = q.AreaValue?.value ?? q.AreaValue;
+                            else if (q.VolumeValue !== undefined) val = q.VolumeValue?.value ?? q.VolumeValue;
+                            else if (q.WeightValue !== undefined) val = q.WeightValue?.value ?? q.WeightValue;
+                            else if (q.CountValue !== undefined) val = q.CountValue?.value ?? q.CountValue;
+                            else if (q.TimeValue !== undefined) val = q.TimeValue?.value ?? q.TimeValue;
+
+                            if (val !== null && typeof val === 'number') val = parseFloat(val.toFixed(3));
+
+                            // Add to psets table
+                            psets.push({
+                                expressID: el.expressID,
+                                ElementName: elName,
+                                PSetName: psetName,
+                                Property: qName,
+                                Value: val ?? '',
+                            });
+
+                            // Extract key quantities for element columns
+                            if (val !== null) {
+                                const ln = qName.toLowerCase();
+                                if (!area && (ln.includes('area') || ln === 'grosssidearea' || ln === 'netsidearea' || ln === 'grossarea' || ln === 'netarea')) {
+                                    area = val;
+                                }
+                                if (!volume && (ln.includes('volume') || ln === 'grossvolume' || ln === 'netvolume')) {
+                                    volume = val;
+                                }
+                                if (!length && (ln === 'length' || ln === 'height' || ln === 'perimeter')) {
+                                    length = val;
+                                }
+                            }
+                        }
                     }
                 }
             } catch (_) { /* skip */ }
+
+            elements.push({
+                expressID: el.expressID,
+                GlobalId: el.GlobalId?.value ?? '',
+                Name: elName,
+                Type: typeName,
+                Level: storeyMap.get(el.expressID) ?? '',
+                Tag: el.Tag?.value ?? '',
+                Area: area,
+                Volume: volume,
+                Length: length,
+            });
         }
     }
 

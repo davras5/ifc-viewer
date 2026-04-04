@@ -43,7 +43,7 @@ ifc-viewer/
 |-------|---------|---------|
 | 3D Core | [Three.js](https://threejs.org/) | 0.155.0 |
 | IFC Loader | [web-ifc-three](https://github.com/IFCjs/web-ifc-three) | 0.0.126 |
-| IFC Parsing | [web-ifc](https://github.com/thatopen/engine_web-ifc) (WASM) | 0.0.66 |
+| IFC Parsing | [web-ifc](https://github.com/thatopen/engine_web-ifc) (WASM) | 0.0.77 |
 | Raycast Acceleration | [three-mesh-bvh](https://github.com/gkjohnson/three-mesh-bvh) | 0.5.23 |
 | Excel Generation | [SheetJS](https://sheetjs.com/) | 0.20.1 |
 | Styling | Tailwind CSS + Font Awesome 6.4.0 | CDN |

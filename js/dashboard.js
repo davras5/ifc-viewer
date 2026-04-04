@@ -353,7 +353,9 @@ const COLUMNS = [
   { key: "Name", label: "Name" },
   { key: "Type", label: "Type" },
   { key: "Level", label: "Level" },
-  { key: "Space", label: "Space" },
+  { key: "Area", label: "Area (m\u00B2)" },
+  { key: "Volume", label: "Volume (m\u00B3)" },
+  { key: "Length", label: "Length (m)" },
   { key: "Tag", label: "Tag" },
 ];
 

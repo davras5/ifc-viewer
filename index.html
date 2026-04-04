@@ -25,7 +25,7 @@
                 "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.155.0/examples/jsm/",
                 "three/examples/jsm/utils/BufferGeometryUtils": "https://cdn.jsdelivr.net/npm/three@0.155.0/examples/jsm/utils/BufferGeometryUtils.js",
                 "three-mesh-bvh": "https://unpkg.com/three-mesh-bvh@0.5.23/build/index.module.js",
-                "web-ifc": "https://unpkg.com/web-ifc@0.0.66/web-ifc-api.js",
+                "web-ifc": "https://unpkg.com/web-ifc@0.0.77/web-ifc-api.js",
                 "web-ifc-three": "https://unpkg.com/web-ifc-three@0.0.126/IFCLoader.js"
             }
         }
@@ -74,7 +74,7 @@
                         <i class="fa-solid fa-cube text-2xl text-blue-600"></i>
                         <div>
                             <h1 class="font-bold text-gray-800 text-lg">IFC Viewer</h1>
-                            <p class="text-xs text-gray-500">Engine: web-ifc 0.0.66</p>
+                            <p class="text-xs text-gray-500">Engine: web-ifc 0.0.77</p>
                         </div>
                         <button id="controls-close" title="Close panel" aria-label="Close controls"><i class="fa-solid fa-times" aria-hidden="true"></i></button>
                     </div>
@@ -118,14 +118,26 @@
 
                 <!-- Viewer toolbar (bottom-left) -->
                 <div id="viewer-toolbar" class="viewer-toolbar glass-panel" role="toolbar" aria-label="Viewer tools">
-                    <button id="vt-material" class="tb-btn" title="Toggle materials" aria-label="Toggle original materials">
-                        <i class="fa-solid fa-swatchbook" aria-hidden="true"></i>
-                    </button>
+                    <div class="vt-dropdown">
+                        <button id="vt-material" class="tb-btn active" title="View mode" aria-label="Change view mode">
+                            <i class="fa-solid fa-fill-drip" aria-hidden="true"></i>
+                            <i class="fa-solid fa-caret-up vt-caret" aria-hidden="true"></i>
+                        </button>
+                        <div id="vt-material-menu" class="vt-dropdown-menu">
+                            <button class="vt-dropdown-item" data-mode="0"><i class="fa-solid fa-swatchbook"></i> Solid</button>
+                            <button class="vt-dropdown-item active" data-mode="1"><i class="fa-solid fa-fill-drip"></i> IFC Materials</button>
+                            <button class="vt-dropdown-item" data-mode="2"><i class="fa-solid fa-eye"></i> X-ray</button>
+                            <button class="vt-dropdown-item" data-mode="3"><i class="fa-solid fa-border-none"></i> Wireframe</button>
+                        </div>
+                    </div>
                     <button id="vt-grid" class="tb-btn active" title="Toggle grid" aria-label="Toggle grid visibility">
                         <i class="fa-solid fa-border-all" aria-hidden="true"></i>
                     </button>
                     <button id="vt-pan" class="tb-btn" title="Pan mode" aria-label="Toggle pan mode">
                         <i class="fa-solid fa-hand" aria-hidden="true"></i>
+                    </button>
+                    <button id="vt-fps" class="tb-btn" title="First-person mode" aria-label="Toggle first-person navigation">
+                        <i class="fa-solid fa-person-walking" aria-hidden="true"></i>
                     </button>
                     <button id="vt-measure" class="tb-btn" title="Measure (coming soon)" aria-label="Measure tool" disabled>
                         <i class="fa-solid fa-ruler" aria-hidden="true"></i>

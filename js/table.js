@@ -73,7 +73,9 @@ const ELEMENT_COLS = [
   { key: "Name", label: "Name", cls: "col-e-name" },
   { key: "Type", label: "Type", cls: "col-e-type" },
   { key: "Level", label: "Level", cls: "col-e-level" },
-  { key: "Space", label: "Space", cls: "col-e-space" },
+  { key: "Area", label: "Area (m\u00B2)", cls: "col-e-area", numeric: true },
+  { key: "Volume", label: "Volume (m\u00B3)", cls: "col-e-vol", numeric: true },
+  { key: "Length", label: "Length (m)", cls: "col-e-len", numeric: true },
   { key: "Tag", label: "Tag", cls: "col-e-tag" },
 ];
 
@@ -976,7 +978,7 @@ function renderElements() {
   if (eSearch) {
     data = data.filter((el) => {
       const s =
-        `${el.expressID} ${el.GlobalId} ${el.Name} ${el.Type} ${el.Level} ${el.Space} ${el.Tag}`.toLowerCase();
+        `${el.expressID} ${el.GlobalId} ${el.Name} ${el.Type} ${el.Level} ${el.Tag}`.toLowerCase();
       return s.includes(eSearch);
     });
   }

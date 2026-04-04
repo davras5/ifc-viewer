@@ -3,7 +3,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { IFCLoader } from 'web-ifc-three';
 import * as WebIFC from 'web-ifc';
 import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast } from 'three-mesh-bvh';
-import { initTable, populateTable, highlightRow, toggle as toggleTable } from './table.js';
+import { initTable, populateTable, highlightRow, toggle as toggleTable, onColorBy, resetColorBy } from './table.js';
+import { cssColorToHex } from './color-palette.js';
 
 // --- Setup BVH ---
 THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
@@ -108,6 +109,67 @@ initTable(tablePanel, {
 
 tblToggleBtn.addEventListener('click', toggleTable);
 
+// --- Global loading overlay ---
+const loadingOverlay = document.getElementById('loading-overlay');
+const loadingText = document.getElementById('loading-text');
+
+function showLoading(msg = 'Loading...') {
+    loadingText.textContent = msg;
+    loadingOverlay.classList.remove('hidden');
+}
+
+function hideLoading() {
+    loadingOverlay.classList.add('hidden');
+}
+
+// --- Color-by subsets ---
+const colorSubsets = [];
+const materialCache = new Map();
+
+function getOrCreateMaterial(hexColor) {
+    if (materialCache.has(hexColor)) return materialCache.get(hexColor);
+    const mat = new THREE.MeshLambertMaterial({
+        color: hexColor,
+        transparent: true,
+        opacity: 0.85,
+        depthTest: true,
+    });
+    materialCache.set(hexColor, mat);
+    return mat;
+}
+
+function applyColorSubsets(config) {
+    clearColorSubsets();
+    if (!config || !ifcModel) return;
+    for (const [value, ids] of config.expressIDsByValue) {
+        const cssColor = config.valueToColor.get(value);
+        const hex = cssColorToHex(cssColor);
+        const material = getOrCreateMaterial(hex);
+        const subset = ifcLoader.ifcManager.createSubset({
+            modelID: ifcModel.modelID,
+            ids,
+            material,
+            scene,
+            removePrevious: false,
+        });
+        colorSubsets.push({ material, subset });
+    }
+}
+
+function clearColorSubsets() {
+    if (!ifcModel) return;
+    for (const { material } of colorSubsets) {
+        ifcLoader.ifcManager.removeSubset(ifcModel.modelID, material);
+    }
+    colorSubsets.length = 0;
+}
+
+onColorBy(async (config) => {
+    if (config) showLoading('Applying colors...');
+    applyColorSubsets(config);
+    hideLoading();
+});
+
 // --- 4. UI Logic ---
 const statusDiv = document.getElementById('status');
 const exportBtn = document.getElementById('export-btn');
@@ -144,6 +206,8 @@ function setStatus(msg, type='loading') {
 // --- 5. Main Loading Logic (Reusable) ---
 async function loadModel(url) {
     if(ifcModel) {
+        clearColorSubsets();
+        resetColorBy();
         scene.remove(ifcModel);
         ifcLoader.ifcManager.removeSubset(ifcModel.modelID, highlightMaterial);
         ifcModel = null;
@@ -151,12 +215,14 @@ async function loadModel(url) {
     }
 
     setStatus(`Initializing Engine & Parsing...`, 'loading');
+    showLoading('Loading IFC model...');
     exportBtn.disabled = true;
     sampleBtn.disabled = true;
 
     try {
         await initIFCEngine();
 
+        showLoading('Parsing geometry...');
         ifcModel = await ifcLoader.loadAsync(url);
         scene.add(ifcModel);
 
@@ -172,16 +238,19 @@ async function loadModel(url) {
         controls.update();
 
         // Extract elements + property sets for table
+        showLoading('Extracting element data...');
         setStatus('Extracting element data...', 'loading');
         const { elements, psets, totalCount } = await extractTableData(ifcModel.modelID);
 
         populateTable(elements, psets);
+        hideLoading();
 
         setStatus(`<b>Loaded!</b><br/>~${totalCount} Elements`, 'success');
         exportBtn.disabled = false;
         sampleBtn.disabled = false;
 
     } catch(err) {
+        hideLoading();
         console.error("IFC Loading Error:", err);
         setStatus("Error: " + (err.message || "Failed to load"), 'error');
         sampleBtn.disabled = false;
@@ -260,55 +329,16 @@ document.getElementById('file-input').addEventListener('change', async (e) => {
     await loadModel(url);
 });
 
-// Sample Model (EMBEDDED GENERATOR)
+// Sample Model
 sampleBtn.addEventListener('click', async () => {
-    setStatus("Generating Sample Model...", 'loading');
+    setStatus("Loading sample model...", 'loading');
     sampleBtn.disabled = true;
     exportBtn.disabled = true;
 
-    // Minimal valid IFC file content to prevent network/CORS errors
-    const ifcString = `ISO-10303-21;
-HEADER;
-FILE_DESCRIPTION(('ViewDefinition [CoordinationView]'),'2;1');
-FILE_NAME('Sample.ifc','2023-11-20',('User'),('Org'),'IFC text editor','IFC text editor','None');
-FILE_SCHEMA(('IFC2X3'));
-ENDSEC;
-DATA;
-#1=IFCPROJECT('0j1k2l3m4n5o6p7q8r9s0t',#2,'Default Project',$,$,$,$,(#10),#3);
-#2=IFCOWNERHISTORY(#4,#5,$,.ADDED.,$,$,$,1700494444);
-#3=IFCUNITASSIGNMENT((#6,#7,#8,#9));
-#4=IFCPERSON($,'User','Defined',$,$,$,$,$);
-#5=IFCORGANIZATION($,'Organization',$,$,$);
-#6=IFCSIUNIT(*,.LENGTHUNIT.,$,.METRE.);
-#7=IFCSIUNIT(*,.AREAUNIT.,$,.SQUARE_METRE.);
-#8=IFCSIUNIT(*,.VOLUMEUNIT.,$,.CUBIC_METRE.);
-#9=IFCSIUNIT(*,.PLANEANGLEUNIT.,$,.RADIAN.);
-#10=IFCSITE('0j1k2l3m4n5o6p7q8r9s0u',#2,'Default Site',$,$,#11,$,$,.ELEMENT.,(0,0,0),(0,0,0),0.,$,$);
-#11=IFCBUILDING('0j1k2l3m4n5o6p7q8r9s0v',#2,'Default Building',$,$,#12,$,$,.ELEMENT.,(0,0,0),(0,0,0),0.,$,$);
-#12=IFCBUILDINGSTOREY('0j1k2l3m4n5o6p7q8r9s0w',#2,'Level 1',$,$,#13,$,$,.ELEMENT.,0.);
-#13=IFCWALLSTANDARDCASE('0j1k2l3m4n5o6p7q8r9s0x',#2,'Sample Wall',$,$,#14,#19,$,.STANDARD.);
-#14=IFCLOCALPLACEMENT($,#15);
-#15=IFCAXIS2PLACEMENT3D(#16,#17,#18);
-#16=IFCCARTESIANPOINT((0.,0.,0.));
-#17=IFCDIRECTION((0.,0.,1.));
-#18=IFCDIRECTION((1.,0.,0.));
-#19=IFCPRODUCTDEFINITIONSHAPE($,$,(#20));
-#20=IFCSHAPEREPRESENTATION(#11,'Body','SweptSolid',(#21));
-#21=IFCEXTRUDEDAREASOLID(#22,#23,#17,2.5);
-#22=IFCRECTANGLEPROFILEDEF(.AREA.,'Wall Profile',$,4.,0.3);
-#23=IFCAXIS2PLACEMENT3D(#16,#17,#18);
-ENDSEC;
-END-ISO-10303-21;`;
-
     try {
-        // Convert string to blob, then to file URL
-        const blob = new Blob([ifcString], { type: 'text/plain' });
-        const file = new File([blob], "Sample.ifc");
-        const url = URL.createObjectURL(file);
-
-        await loadModel(url);
+        await loadModel("assets/Ifc4_Revit_ARC.ifc");
     } catch (err) {
-         console.error("Sample Gen Error:", err);
+         console.error("Sample Load Error:", err);
          setStatus("Error: " + err.message, 'error');
          sampleBtn.disabled = false;
     }
@@ -346,6 +376,8 @@ window.addEventListener('pointerup', async (event) => {
     // If we dragged/rotated, do NOT select
     if(isDragging) return;
     if(!ifcModel) return;
+    // Only raycast clicks inside the 3D viewer
+    if(!container.contains(event.target)) return;
 
     // --- Raycasting Logic ---
     const rect = container.getBoundingClientRect();

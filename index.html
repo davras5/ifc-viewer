@@ -34,6 +34,14 @@
     <div id="viewer-area">
         <div id="viewer-container"></div>
 
+        <!-- Global loading overlay -->
+        <div id="loading-overlay" class="loading-overlay hidden">
+            <div class="loading-spinner">
+                <i class="fa-solid fa-spinner fa-spin"></i>
+                <span id="loading-text">Loading...</span>
+            </div>
+        </div>
+
         <!-- Main Controls -->
         <div class="absolute top-5 left-5 w-80 glass-panel rounded-xl p-4 flex flex-col gap-4 z-10">
             <div class="flex items-center gap-3 border-b border-gray-200 pb-3">
@@ -74,6 +82,9 @@
             </div>
             <div id="prop-content" class="p-3 overflow-y-auto text-xs space-y-2"></div>
         </div>
+
+        <!-- Color Legend Panel -->
+        <div id="color-legend" class="color-legend glass-panel rounded-xl hidden z-10"></div>
 
         <!-- Footer (inside viewer area) -->
         <div class="absolute bottom-4 right-4 z-10">

@@ -1,8 +1,10 @@
 /**
  * IFC Table widget — two tabs (Elements / Property Sets), toolbar with search,
- * sortable headers, pagination, column visibility dropdown, resize handle,
- * export actions (Excel / CSV).
+ * sortable headers with unified dropdown (sort / filter / color-by),
+ * pagination, column visibility dropdown, resize handle, export actions.
  */
+
+import { categoricalPalette, gradientPalette } from "./color-palette.js";
 
 /* ── Helpers ── */
 
@@ -44,6 +46,16 @@ let pSearch = "";
 let pPage = 1;
 let pPageSize = 50;
 
+// Filter state: { columnKey: Set<allowedStringValues> }
+let eFilters = {};
+let pFilters = {};
+
+// Color-by state (one column at a time, any tab)
+let colorByConfig = null;
+// { tab:"elements"|"psets", key:string, mode:"categorical"|"gradient", palette:Map<string,string> }
+
+let onColorByChange = null;
+
 /* ── Column definitions ── */
 
 const ELEMENT_COLS = [
@@ -66,12 +78,92 @@ function activeCols() {
   return activeTab === "elements" ? ELEMENT_COLS : PSET_COLS;
 }
 
+function activeData() {
+  return activeTab === "elements" ? elementsData : psetsData;
+}
+
+function activeFilters() {
+  return activeTab === "elements" ? eFilters : pFilters;
+}
+
 /* ── Public API ── */
 
 export function initTable(el, { onElementSelect } = {}) {
   container = el;
   onElementRowClick = onElementSelect || null;
   renderEmptyState();
+}
+
+export function onColorBy(callback) {
+  onColorByChange = callback;
+}
+
+export function resetColorBy() {
+  if (colorByConfig) {
+    colorByConfig = null;
+    if (onColorByChange) onColorByChange(null);
+    renderActiveTab();
+    updateHeaderIndicators(activeTab === "elements" ? "e" : "ps");
+  }
+  updateLegend();
+}
+
+/* ── Color legend panel ── */
+
+function updateLegend() {
+  const panel = document.getElementById("color-legend");
+  if (!panel) return;
+
+  if (!colorByConfig) {
+    panel.classList.add("hidden");
+    panel.innerHTML = "";
+    return;
+  }
+
+  const data = colorByConfig.tab === "elements" ? elementsData : psetsData;
+  const counts = new Map();
+  for (const row of data) {
+    const v = String(row[colorByConfig.key] ?? "");
+    counts.set(v, (counts.get(v) || 0) + 1);
+  }
+
+  const col = (colorByConfig.tab === "elements" ? ELEMENT_COLS : PSET_COLS)
+    .find((c) => c.key === colorByConfig.key);
+  const colLabel = col ? col.label : colorByConfig.key;
+
+  const entries = [...colorByConfig.palette.entries()];
+
+  panel.innerHTML = `
+    <div class="color-legend-header">
+      <div>
+        <div class="color-legend-title">Color by</div>
+        <div class="color-legend-col">${esc(colLabel)}</div>
+      </div>
+      <button class="color-legend-close" id="legend-close" title="Close">&times;</button>
+    </div>
+    <div class="color-legend-body">
+      ${entries
+        .map(
+          ([val, color]) =>
+            `<div class="color-legend-item">
+              <span class="color-legend-swatch" style="background:${color}"></span>
+              <span class="color-legend-label" title="${esc(val)}">${esc(val || "(empty)")}</span>
+              <span class="color-legend-count">${counts.get(val) || 0}</span>
+            </div>`
+        )
+        .join("")}
+    </div>
+    <div class="color-legend-footer">
+      <button class="color-legend-clear" id="legend-clear">
+        <i class="fa-solid fa-xmark"></i> Clear colors
+      </button>
+    </div>
+  `;
+
+  panel.classList.remove("hidden");
+
+  panel.querySelector("#legend-close").addEventListener("click", () => resetColorBy());
+  panel.querySelector("#legend-clear").addEventListener("click", () => resetColorBy());
 }
 
 function renderEmptyState() {
@@ -90,6 +182,9 @@ export function populateTable(elements, psets) {
   pPage = 1;
   eSearch = "";
   pSearch = "";
+  eFilters = {};
+  pFilters = {};
+  resetColorBy();
   activeTab = "elements";
   renderShell();
   renderActiveTab();
@@ -148,6 +243,29 @@ function switchToTab(tabName) {
   renderActiveTab();
 }
 
+/* ── Filter helpers ── */
+
+function applyFilters(data, filters) {
+  const keys = Object.keys(filters);
+  if (keys.length === 0) return data;
+  return data.filter((row) => {
+    for (const key of keys) {
+      const val = String(row[key] ?? "");
+      if (!filters[key].has(val)) return false;
+    }
+    return true;
+  });
+}
+
+function getUniqueValues(data, key) {
+  const counts = new Map();
+  for (const row of data) {
+    const v = String(row[key] ?? "");
+    counts.set(v, (counts.get(v) || 0) + 1);
+  }
+  return counts; // Map<string, number>
+}
+
 /* ── Shell ── */
 
 function renderShell() {
@@ -192,7 +310,7 @@ function renderShell() {
         </div>
       </div>
       <div class="tbl-tab-content active" id="ttab-elements">
-        <div class="tbl-scroll">
+        <div class="tbl-scroll" id="el-scroll">
           <table class="tbl-table" id="el-table">
             <thead><tr id="el-header"></tr></thead>
             <tbody id="el-body"></tbody>
@@ -201,7 +319,7 @@ function renderShell() {
         <div class="tbl-pagination" id="el-pagination"></div>
       </div>
       <div class="tbl-tab-content" id="ttab-psets">
-        <div class="tbl-scroll">
+        <div class="tbl-scroll" id="ps-scroll">
           <table class="tbl-table" id="ps-table">
             <thead><tr id="ps-header"></tr></thead>
             <tbody id="ps-body"></tbody>
@@ -287,6 +405,13 @@ function renderShell() {
   renderHeaders("el-header", ELEMENT_COLS, "e");
   renderHeaders("ps-header", PSET_COLS, "ps");
   updateColumnsDropdown();
+
+  // Close header dropdown on outside click
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".th-dropdown") && !e.target.closest(".th-dd-btn")) {
+      closeHeaderDropdown();
+    }
+  });
 }
 
 function setupDropdown(btnId, menuId) {
@@ -294,7 +419,6 @@ function setupDropdown(btnId, menuId) {
   const menu = container.querySelector(`#${menuId}`);
   btn.addEventListener("click", (e) => {
     e.stopPropagation();
-    // Close other dropdowns
     container.querySelectorAll(".tbl-dropdown-menu.show").forEach((m) => {
       if (m !== menu) m.classList.remove("show");
     });
@@ -309,45 +433,307 @@ function setupDropdown(btnId, menuId) {
 
 /* ── Headers ── */
 
+let activeHeaderDropdown = null; // { th, dropdown, colDef, prefix }
+
 function renderHeaders(rowId, cols, prefix) {
   const row = container.querySelector(`#${rowId}`);
   row.innerHTML = cols
     .map(
       (c) =>
         `<th class="${c.cls} sortable" data-key="${c.key}" data-prefix="${prefix}">
-      ${esc(c.label)} <i class="fa-solid fa-sort sort-icon"></i>
+      <span class="th-sort-area">
+        <span class="th-label">${esc(c.label)}</span>
+        <i class="fa-solid fa-sort sort-icon"></i>
+        <span class="th-color-dot" hidden>\u25CF</span>
+      </span>
+      <button class="th-dd-btn" title="Filter &amp; Color" data-key="${c.key}">
+        <i class="fa-solid fa-filter"></i>
+      </button>
     </th>`
     )
     .join("");
 
-  row.querySelectorAll("th.sortable").forEach((th) => {
-    th.addEventListener("click", () => {
+  // Left area click → sort
+  row.querySelectorAll(".th-sort-area").forEach((area) => {
+    area.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const th = area.closest("th");
       const key = th.dataset.key;
       if (prefix === "e") {
         if (eSortField === key) eSortAsc = !eSortAsc;
-        else {
-          eSortField = key;
-          eSortAsc = true;
-        }
+        else { eSortField = key; eSortAsc = true; }
       } else {
         if (pSortField === key) pSortAsc = !pSortAsc;
-        else {
-          pSortField = key;
-          pSortAsc = true;
-        }
+        else { pSortField = key; pSortAsc = true; }
       }
       renderActiveTab();
-      updateSortIndicators(
-        rowId,
-        key,
-        prefix === "e" ? eSortAsc : pSortAsc
-      );
+      updateSortIndicators(rowId, key, prefix === "e" ? eSortAsc : pSortAsc);
     });
+  });
+
+  // Filter button click → open dropdown
+  row.querySelectorAll(".th-dd-btn").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const th = btn.closest("th");
+      const key = th.dataset.key;
+      const colDef = cols.find((c) => c.key === key);
+      openHeaderDropdown(th, colDef, prefix);
+    });
+  });
+}
+
+function closeHeaderDropdown() {
+  if (activeHeaderDropdown) {
+    activeHeaderDropdown.dropdown.remove();
+    activeHeaderDropdown = null;
+  }
+}
+
+function openHeaderDropdown(th, colDef, prefix) {
+  // Close existing
+  closeHeaderDropdown();
+
+  const data = activeData();
+  const filters = activeFilters();
+  const uniqueValues = getUniqueValues(data, colDef.key);
+  const sortedValues = [...uniqueValues.keys()].sort();
+  const currentFilter = filters[colDef.key];
+  const isColorActive =
+    colorByConfig && colorByConfig.tab === activeTab && colorByConfig.key === colDef.key;
+  const currentMode = isColorActive ? colorByConfig.mode : "none";
+
+  const dropdown = document.createElement("div");
+  dropdown.className = "th-dropdown";
+  dropdown.addEventListener("click", (e) => e.stopPropagation());
+
+  dropdown.innerHTML = `
+    <div class="th-dd-section">
+      <div class="th-dd-title">Filter</div>
+      <input type="text" class="th-dd-filter-search" placeholder="Search values...">
+      <div class="th-dd-toggles">
+        <button class="tbl-toggle-btn th-select-all">All</button>
+        <button class="tbl-toggle-btn th-clear-all">Clear</button>
+      </div>
+      <div class="th-dd-filter-list">
+        ${sortedValues
+          .map((v) => {
+            const checked = !currentFilter || currentFilter.has(v);
+            return `<label class="th-dd-check" data-value="${esc(v)}">
+              <input type="checkbox" ${checked ? "checked" : ""} data-val="${esc(v)}">
+              <span class="th-dd-check-label">${esc(v || "(empty)")}</span>
+              <span class="th-dd-check-count">${uniqueValues.get(v)}</span>
+            </label>`;
+          })
+          .join("")}
+      </div>
+    </div>
+    <hr class="th-dd-divider">
+    <div class="th-dd-section">
+      <div class="th-dd-title">Color by</div>
+      <label class="th-dd-radio"><input type="radio" name="hd-color" value="none" ${currentMode === "none" ? "checked" : ""}> None</label>
+      <label class="th-dd-radio"><input type="radio" name="hd-color" value="categorical" ${currentMode === "categorical" ? "checked" : ""}> Categorical</label>
+      ${colDef.numeric ? `<label class="th-dd-radio"><input type="radio" name="hd-color" value="gradient" ${currentMode === "gradient" ? "checked" : ""}> Gradient</label>` : ""}
+      <div class="th-dd-color-preview" id="hd-color-preview"></div>
+      <button class="th-dd-apply-btn" id="hd-apply-color">Apply colors</button>
+    </div>
+  `;
+
+  // Position dropdown using fixed positioning; flip up if no space below
+  document.body.appendChild(dropdown);
+  const thRect = th.getBoundingClientRect();
+  dropdown.style.position = "fixed";
+  dropdown.style.left = thRect.left + "px";
+  dropdown.style.zIndex = "9999";
+
+  const ddHeight = dropdown.offsetHeight;
+  const spaceBelow = window.innerHeight - thRect.bottom;
+  if (spaceBelow < ddHeight && thRect.top > ddHeight) {
+    dropdown.style.bottom = (window.innerHeight - thRect.top + 2) + "px";
+  } else {
+    dropdown.style.top = (thRect.bottom + 2) + "px";
+  }
+
+  activeHeaderDropdown = { th, dropdown, colDef, prefix };
+
+  // --- Filter handlers ---
+  const filterList = dropdown.querySelector(".th-dd-filter-list");
+  const filterSearch = dropdown.querySelector(".th-dd-filter-search");
+
+  filterSearch.addEventListener("input", () => {
+    const q = filterSearch.value.toLowerCase();
+    filterList.querySelectorAll(".th-dd-check").forEach((lbl) => {
+      const v = lbl.dataset.value.toLowerCase();
+      lbl.style.display = v.includes(q) ? "" : "none";
+    });
+  });
+
+  dropdown.querySelector(".th-select-all").addEventListener("click", () => {
+    filterList.querySelectorAll('input[type="checkbox"]').forEach((cb) => (cb.checked = true));
+    commitFilter(colDef.key, prefix, filterList, sortedValues);
+  });
+  dropdown.querySelector(".th-clear-all").addEventListener("click", () => {
+    filterList.querySelectorAll('input[type="checkbox"]').forEach((cb) => (cb.checked = false));
+    commitFilter(colDef.key, prefix, filterList, sortedValues);
+  });
+
+  filterList.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.addEventListener("change", () => {
+      commitFilter(colDef.key, prefix, filterList, sortedValues);
+    });
+  });
+
+  // --- Color handlers ---
+  const colorRadios = dropdown.querySelectorAll('input[name="hd-color"]');
+  const colorPreview = dropdown.querySelector("#hd-color-preview");
+
+  function updateColorPreview() {
+    const mode = dropdown.querySelector('input[name="hd-color"]:checked').value;
+    if (mode === "none") {
+      colorPreview.innerHTML = "";
+      return;
+    }
+    const MAX_PREVIEW = 10;
+    const vals = sortedValues.slice(0, MAX_PREVIEW);
+    const colors =
+      mode === "categorical"
+        ? categoricalPalette(sortedValues.length)
+        : gradientPalette(sortedValues.length);
+    colorPreview.innerHTML = vals
+      .map(
+        (v, i) =>
+          `<span class="th-dd-swatch"><span class="th-dd-swatch-box" style="background:${colors[i]}"></span>${esc(v || "(empty)")}</span>`
+      )
+      .join("");
+    if (sortedValues.length > MAX_PREVIEW) {
+      colorPreview.innerHTML += `<span class="th-dd-swatch-more">+${sortedValues.length - MAX_PREVIEW} more</span>`;
+    }
+  }
+
+  colorRadios.forEach((r) => r.addEventListener("change", updateColorPreview));
+  updateColorPreview();
+
+  dropdown.querySelector("#hd-apply-color").addEventListener("click", async () => {
+    const btn = dropdown.querySelector("#hd-apply-color");
+    const mode = dropdown.querySelector('input[name="hd-color"]:checked').value;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Applying...';
+    // Yield to let the UI update before heavy work
+    await new Promise((r) => setTimeout(r, 20));
+    await applyColorBy(colDef, mode, prefix, sortedValues);
+    closeHeaderDropdown();
+  });
+}
+
+function commitFilter(key, prefix, filterList, allValues) {
+  const checked = new Set();
+  filterList.querySelectorAll('input[type="checkbox"]:checked').forEach((cb) => {
+    checked.add(cb.dataset.val);
+  });
+
+  const filters = prefix === "e" ? eFilters : pFilters;
+
+  if (checked.size === allValues.length) {
+    delete filters[key];
+  } else {
+    filters[key] = checked;
+  }
+
+  if (prefix === "e") ePage = 1;
+  else pPage = 1;
+
+  renderActiveTab();
+  updateHeaderIndicators(prefix);
+}
+
+/* ── Color-by logic ── */
+
+async function applyColorBy(colDef, mode, prefix, sortedValues) {
+  if (mode === "none") {
+    colorByConfig = null;
+    if (onColorByChange) await onColorByChange(null);
+    renderActiveTab();
+    updateHeaderIndicators(prefix);
+    updateLegend();
+    return;
+  }
+
+  const data = activeData();
+  const uniqueVals = sortedValues || [...getUniqueValues(data, colDef.key).keys()].sort();
+
+  let valsForPalette = uniqueVals;
+  if (mode === "gradient" && colDef.numeric) {
+    valsForPalette = [...uniqueVals].sort((a, b) => parseFloat(a) - parseFloat(b));
+  }
+
+  const colors =
+    mode === "categorical"
+      ? categoricalPalette(valsForPalette.length)
+      : gradientPalette(valsForPalette.length);
+
+  const palette = new Map();
+  valsForPalette.forEach((v, i) => palette.set(v, colors[i]));
+
+  const expressIDsByValue = new Map();
+  data.forEach((row) => {
+    const v = String(row[colDef.key] ?? "");
+    if (!expressIDsByValue.has(v)) expressIDsByValue.set(v, []);
+    expressIDsByValue.get(v).push(row.expressID);
+  });
+
+  colorByConfig = {
+    tab: activeTab,
+    key: colDef.key,
+    mode,
+    palette,
+  };
+
+  if (onColorByChange) {
+    await onColorByChange({
+      column: colDef.key,
+      mode,
+      valueToColor: palette,
+      expressIDsByValue,
+    });
+  }
+
+  renderActiveTab();
+  updateHeaderIndicators(prefix);
+  updateLegend();
+}
+
+/* ── Header indicators ── */
+
+function updateHeaderIndicators(prefix) {
+  const rowId = prefix === "e" ? "el-header" : "ps-header";
+  const row = container.querySelector(`#${rowId}`);
+  if (!row) return;
+
+  const filters = prefix === "e" ? eFilters : pFilters;
+  const tab = prefix === "e" ? "elements" : "psets";
+
+  row.querySelectorAll("th.sortable").forEach((th) => {
+    const key = th.dataset.key;
+
+    // Highlight filter button when filter or color is active
+    const ddBtn = th.querySelector(".th-dd-btn");
+    if (ddBtn) {
+      const hasFilter = !!filters[key];
+      const hasColor = colorByConfig && colorByConfig.tab === tab && colorByConfig.key === key;
+      ddBtn.classList.toggle("active", hasFilter || hasColor);
+    }
+
+    // Color dot indicator (next to label)
+    const colorDot = th.querySelector(".th-color-dot");
+    if (colorDot) {
+      colorDot.hidden = !(colorByConfig && colorByConfig.tab === tab && colorByConfig.key === key);
+    }
   });
 }
 
 function updateSortIndicators(rowId, activeKey, asc) {
   const row = container.querySelector(`#${rowId}`);
+  if (!row) return;
   row.querySelectorAll("th.sortable").forEach((th) => {
     const icon = th.querySelector(".sort-icon");
     if (th.dataset.key === activeKey) {
@@ -414,6 +800,8 @@ function renderElements() {
     });
   }
 
+  data = applyFilters(data, eFilters);
+
   const col = ELEMENT_COLS.find((c) => c.key === eSortField);
   data.sort((a, b) => {
     let va = a[eSortField] ?? "";
@@ -440,16 +828,14 @@ function renderElements() {
     </td></tr>`;
   } else {
     body.innerHTML = page
-      .map(
-        (row) =>
-          `<tr data-eid="${row.expressID}" tabindex="0">
-        ${ELEMENT_COLS.map((c) => `<td class="${c.cls} ${c.numeric ? "num" : ""}">${fmtCell(row[c.key], c.numeric)}</td>`).join("")}
-      </tr>`
-      )
+      .map((row) => {
+        return `<tr data-eid="${row.expressID}" tabindex="0">
+        ${ELEMENT_COLS.map((c) => `<td class="${c.cls} ${c.numeric ? "num" : ""}"${cellColorStyle(row, c)}>${fmtCell(row[c.key], c.numeric)}</td>`).join("")}
+      </tr>`;
+      })
       .join("");
   }
 
-  // Row click
   body.querySelectorAll("tr[data-eid]").forEach((tr) => {
     tr.addEventListener("click", () => {
       const id = parseInt(tr.dataset.eid, 10);
@@ -476,12 +862,13 @@ function renderElements() {
     (s) => { ePageSize = s; ePage = 1; renderElements(); }
   );
 
-  // Re-apply hidden columns
   container
     .querySelectorAll("#col-list input[type='checkbox']")
     .forEach((cb) => {
       if (!cb.checked) toggleCol(cb);
     });
+
+  updateHeaderIndicators("e");
 }
 
 /* ── PropSets tab ── */
@@ -496,6 +883,8 @@ function renderPsets() {
       return s.includes(pSearch);
     });
   }
+
+  data = applyFilters(data, pFilters);
 
   const col = PSET_COLS.find((c) => c.key === pSortField);
   data.sort((a, b) => {
@@ -523,16 +912,14 @@ function renderPsets() {
     </td></tr>`;
   } else {
     body.innerHTML = page
-      .map(
-        (row) =>
-          `<tr data-eid="${row.expressID}" tabindex="0">
-        ${PSET_COLS.map((c) => `<td class="${c.cls} ${c.numeric ? "num" : ""}">${fmtCell(row[c.key], c.numeric)}</td>`).join("")}
-      </tr>`
-      )
+      .map((row) => {
+        return `<tr data-eid="${row.expressID}" tabindex="0">
+        ${PSET_COLS.map((c) => `<td class="${c.cls} ${c.numeric ? "num" : ""}"${cellColorStyle(row, c)}>${fmtCell(row[c.key], c.numeric)}</td>`).join("")}
+      </tr>`;
+      })
       .join("");
   }
 
-  // Row click → highlight element in 3D
   body.querySelectorAll("tr[data-eid]").forEach((tr) => {
     tr.addEventListener("click", () => {
       const id = parseInt(tr.dataset.eid, 10);
@@ -564,6 +951,18 @@ function renderPsets() {
     .forEach((cb) => {
       if (!cb.checked) toggleCol(cb);
     });
+
+  updateHeaderIndicators("ps");
+}
+
+/* ── Row swatch (left border color when color-by is active) ── */
+
+function cellColorStyle(row, colDef) {
+  if (!colorByConfig || colorByConfig.tab !== activeTab || colorByConfig.key !== colDef.key) return "";
+  const val = String(row[colDef.key] ?? "");
+  const color = colorByConfig.palette.get(val);
+  if (!color) return "";
+  return ` style="background:${color}; color:#fff; font-weight:600"`;
 }
 
 /* ── Pagination ── */

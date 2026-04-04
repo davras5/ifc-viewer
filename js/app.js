@@ -700,14 +700,28 @@ window.__ifcViewerData = { elements: [], psets: [] };
 
 const loadingOverlay = document.getElementById('loading-overlay');
 const loadingText = document.getElementById('loading-text');
+const loadingBar = document.getElementById('loading-bar');
+const loadingLog = document.getElementById('loading-log');
 
-function showLoading(msg = 'Loading...') {
+function showLoading(msg = 'Loading...', progress) {
     loadingText.textContent = msg;
     loadingOverlay.classList.remove('hidden');
+    if (progress !== undefined) {
+        loadingBar.style.width = Math.round(progress) + '%';
+    }
+}
+
+function logLoading(msg) {
+    const line = document.createElement('div');
+    line.textContent = msg;
+    loadingLog.appendChild(line);
+    loadingLog.scrollTop = loadingLog.scrollHeight;
 }
 
 function hideLoading() {
     loadingOverlay.classList.add('hidden');
+    loadingBar.style.width = '0%';
+    loadingLog.innerHTML = '';
 }
 
 const colorSubsets = [];
@@ -914,23 +928,26 @@ async function loadModel(url) {
         window.closePropPanel();
     }
 
-    setStatus(`Initializing Engine & Parsing...`, 'loading');
-    showLoading('Loading IFC model...');
+    setStatus(`Loading...`, 'loading');
+    showLoading('Initializing engine...', 0);
     exportBtn.disabled = true;
     sampleBtn.disabled = true;
 
     try {
-        await initIFCEngine();
+        const t0 = performance.now();
 
-        showLoading('Parsing geometry...');
+        await initIFCEngine();
+        logLoading('IFC engine ready');
+        showLoading('Parsing IFC geometry...', 10);
+
         ifcModel = await ifcLoader.loadAsync(url);
         scene.add(ifcModel);
+        logLoading(`Geometry parsed in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+        showLoading('Setting up scene...', 25);
 
-        // Reset material mode to solid on new model
         materialMode = 1;
         applyMaterialMode();
 
-        // Auto-center camera
         const box = new THREE.Box3().setFromObject(ifcModel);
         const center = box.getCenter(new THREE.Vector3());
         const size = box.getSize(new THREE.Vector3());
@@ -940,24 +957,29 @@ async function loadModel(url) {
         camera.position.set(center.x + maxDim, center.y + maxDim / 2, center.z + maxDim);
         camera.lookAt(center);
         controls.update();
-
-        // Scale WASD speed to ~0.5% of model dimension per frame
         moveSpeed = Math.max(0.05, maxDim * 0.005);
 
-        // Extract elements + property sets for table
-        showLoading('Extracting element data...');
-        setStatus('Extracting element data...', 'loading');
+        showLoading('Extracting elements & properties...', 30);
+        logLoading('Querying spatial structure...');
         const { elements, psets, totalCount } = await extractTableData(ifcModel.modelID);
+        logLoading(`Extracted ${totalCount} elements, ${psets.length} properties`);
+        showLoading('Building table...', 70);
 
         populateTable(elements, psets);
         syncTableButton();
         window.__ifcViewerData = { elements, psets };
         refreshDashboard();
+        logLoading('Table and dashboard populated');
 
-        // Extract and apply IFC material colors
-        showLoading('Applying materials...');
+        showLoading('Extracting IFC materials...', 80);
+        logLoading('Resolving surface styles and colors...');
         await extractAndApplyMaterials(ifcModel.modelID);
+        logLoading(`Materials applied (${ifcMaterialSubsets.length} color groups)`);
+        showLoading('Done!', 100);
 
+        const totalTime = ((performance.now() - t0) / 1000).toFixed(1);
+        logLoading(`Total: ${totalTime}s`);
+        await new Promise(r => setTimeout(r, 400));
         hideLoading();
 
         setStatus(`<b>Loaded!</b><br/>~${totalCount} Elements`, 'success');
@@ -973,7 +995,6 @@ async function loadModel(url) {
 }
 
 async function extractTableData(modelID) {
-    // Build storey map: elementExpressID → storey name
     const storeyMap = new Map();
 
     try {
@@ -1013,44 +1034,44 @@ async function extractTableData(modelID) {
     const elements = [];
     const psets = [];
 
-    for (const cat of ELEMENT_CATEGORIES) {
+    for (let ci = 0; ci < ELEMENT_CATEGORIES.length; ci++) {
+        const cat = ELEMENT_CATEGORIES[ci];
         const items = await ifcLoader.ifcManager.getAllItemsOfType(modelID, cat, true);
-        for (const el of items) {
+        if (items.length > 0) {
+            const catName = items[0]?.constructor?.name?.replace('Ifc', '') ?? `Category ${ci}`;
+            logLoading(`  ${catName}: ${items.length} elements`);
+            const pct = 30 + Math.round((ci / ELEMENT_CATEGORIES.length) * 35);
+            showLoading(`Extracting ${catName}...`, pct);
+            await new Promise(r => setTimeout(r, 0));
+        }
+
+        const batchPsets = await Promise.all(
+            items.map(el => ifcLoader.ifcManager.getPropertySets(modelID, el.expressID, true).catch(() => []))
+        );
+
+        for (let ei = 0; ei < items.length; ei++) {
+            const el = items[ei];
             const typeName = el.constructor.name.replace('Ifc', '');
             const elName = el.Name?.value ?? '';
-
-            // Base quantities for this element
             let area = '', volume = '', length = '';
 
             try {
-                const propSets = await ifcLoader.ifcManager.getPropertySets(modelID, el.expressID, true);
-                for (const ps of propSets) {
+                for (const ps of batchPsets[ei]) {
                     const psetName = ps.Name?.value ?? 'Unknown';
 
-                    // Standard property sets (HasProperties)
                     if (ps.HasProperties) {
                         for (const prop of ps.HasProperties) {
                             if (!prop.Name?.value || !prop.NominalValue) continue;
                             let val = prop.NominalValue.value;
                             if (typeof val === 'number') val = parseFloat(val.toFixed(3));
-                            psets.push({
-                                expressID: el.expressID,
-                                ElementName: elName,
-                                PSetName: psetName,
-                                Property: prop.Name.value,
-                                Value: val,
-                            });
+                            psets.push({ expressID: el.expressID, ElementName: elName, PSetName: psetName, Property: prop.Name.value, Value: val });
                         }
                     }
 
-                    // Quantity sets (Quantities) — base quantities
                     if (ps.Quantities) {
                         for (const q of ps.Quantities) {
                             if (!q.Name?.value) continue;
                             const qName = q.Name.value;
-                            const qType = q.constructor?.name ?? '';
-
-                            // Extract the value based on quantity type
                             let val = null;
                             if (q.LengthValue !== undefined) val = q.LengthValue?.value ?? q.LengthValue;
                             else if (q.AreaValue !== undefined) val = q.AreaValue?.value ?? q.AreaValue;
@@ -1058,30 +1079,15 @@ async function extractTableData(modelID) {
                             else if (q.WeightValue !== undefined) val = q.WeightValue?.value ?? q.WeightValue;
                             else if (q.CountValue !== undefined) val = q.CountValue?.value ?? q.CountValue;
                             else if (q.TimeValue !== undefined) val = q.TimeValue?.value ?? q.TimeValue;
-
                             if (val !== null && typeof val === 'number') val = parseFloat(val.toFixed(3));
 
-                            // Add to psets table
-                            psets.push({
-                                expressID: el.expressID,
-                                ElementName: elName,
-                                PSetName: psetName,
-                                Property: qName,
-                                Value: val ?? '',
-                            });
+                            psets.push({ expressID: el.expressID, ElementName: elName, PSetName: psetName, Property: qName, Value: val ?? '' });
 
-                            // Extract key quantities for element columns
                             if (val !== null) {
                                 const ln = qName.toLowerCase();
-                                if (!area && (ln.includes('area') || ln === 'grosssidearea' || ln === 'netsidearea' || ln === 'grossarea' || ln === 'netarea')) {
-                                    area = val;
-                                }
-                                if (!volume && (ln.includes('volume') || ln === 'grossvolume' || ln === 'netvolume')) {
-                                    volume = val;
-                                }
-                                if (!length && (ln === 'length' || ln === 'height' || ln === 'perimeter')) {
-                                    length = val;
-                                }
+                                if (!area && ln.includes('area')) area = val;
+                                if (!volume && ln.includes('volume')) volume = val;
+                                if (!length && (ln === 'length' || ln === 'height' || ln === 'perimeter')) length = val;
                             }
                         }
                     }
@@ -1089,15 +1095,9 @@ async function extractTableData(modelID) {
             } catch (_) { /* skip */ }
 
             elements.push({
-                expressID: el.expressID,
-                GlobalId: el.GlobalId?.value ?? '',
-                Name: elName,
-                Type: typeName,
-                Level: storeyMap.get(el.expressID) ?? '',
-                Tag: el.Tag?.value ?? '',
-                Area: area,
-                Volume: volume,
-                Length: length,
+                expressID: el.expressID, GlobalId: el.GlobalId?.value ?? '', Name: elName,
+                Type: typeName, Level: storeyMap.get(el.expressID) ?? '', Tag: el.Tag?.value ?? '',
+                Area: area, Volume: volume, Length: length,
             });
         }
     }

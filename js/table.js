@@ -68,7 +68,7 @@ function removeAllDocListeners() {
 /* ── Column definitions ── */
 
 const ELEMENT_COLS = [
-  { key: "expressID", label: "ID", cls: "col-e-id", numeric: true },
+  { key: "expressID", label: "ID", cls: "col-e-id", numeric: true, integer: true },
   { key: "GlobalId", label: "GlobalId", cls: "col-e-gid" },
   { key: "Name", label: "Name", cls: "col-e-name" },
   { key: "Type", label: "Type", cls: "col-e-type" },
@@ -80,7 +80,7 @@ const ELEMENT_COLS = [
 ];
 
 const PSET_COLS = [
-  { key: "expressID", label: "ID", cls: "col-ps-id", numeric: true },
+  { key: "expressID", label: "ID", cls: "col-ps-id", numeric: true, integer: true },
   { key: "ElementName", label: "Element", cls: "col-ps-el" },
   { key: "PSetName", label: "PSet Name", cls: "col-ps-pset" },
   { key: "Property", label: "Property", cls: "col-ps-prop" },
@@ -1013,7 +1013,7 @@ function renderElements() {
     body.innerHTML = page
       .map((row) => {
         return `<tr data-eid="${row.expressID}" tabindex="0">
-        ${ELEMENT_COLS.map((c) => `<td class="${c.cls} ${c.numeric ? "num" : ""}"${cellColorStyle(row, c)}>${fmtCell(row[c.key], c.numeric)}</td>`).join("")}
+        ${ELEMENT_COLS.map((c) => `<td class="${c.cls} ${c.numeric ? "num" : ""}"${cellColorStyle(row, c)}>${fmtCell(row[c.key], c.numeric, c.integer)}</td>`).join("")}
       </tr>`;
       })
       .join("");
@@ -1098,7 +1098,7 @@ function renderPsets() {
     body.innerHTML = page
       .map((row) => {
         return `<tr data-eid="${row.expressID}" tabindex="0">
-        ${PSET_COLS.map((c) => `<td class="${c.cls} ${c.numeric ? "num" : ""}"${cellColorStyle(row, c)}>${fmtCell(row[c.key], c.numeric)}</td>`).join("")}
+        ${PSET_COLS.map((c) => `<td class="${c.cls} ${c.numeric ? "num" : ""}"${cellColorStyle(row, c)}>${fmtCell(row[c.key], c.numeric, c.integer)}</td>`).join("")}
       </tr>`;
       })
       .join("");
@@ -1278,8 +1278,9 @@ function downloadBlob(content, filename, mime) {
 
 /* ── Cell formatter ── */
 
-function fmtCell(val, numeric) {
+function fmtCell(val, numeric, integer) {
   if (val === null || val === undefined || val === "") return "\u2013";
+  if (integer) return fmtNum(val, 0);
   if (numeric) return fmtNum(val, 2);
   return esc(String(val));
 }

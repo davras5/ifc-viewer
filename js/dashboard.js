@@ -160,14 +160,42 @@ function renderWidgetContent(w) {
 function renderMetric(el, config, data) {
   const col = config.column || "Type";
   const filterVal = config.filterType || "";
-  const count = filterVal
-    ? data.filter((r) => String(r[col] ?? "").toLowerCase().includes(filterVal.toLowerCase())).length
-    : data.length;
+  const agg = config.aggregation || "count";
+  const aggCol = config.aggColumn || "";
+
+  // Filter data
+  const filtered = filterVal
+    ? data.filter((r) => String(r[col] ?? "").toLowerCase().includes(filterVal.toLowerCase()))
+    : data;
+
+  // Compute aggregation
+  let result;
+  let unit = "";
+  if (agg === "count" || !aggCol) {
+    result = filtered.length;
+  } else {
+    const nums = filtered.map((r) => parseFloat(r[aggCol])).filter((n) => !isNaN(n) && n > 0);
+    if (agg === "sum") {
+      result = nums.reduce((s, n) => s + n, 0);
+    } else if (agg === "avg") {
+      result = nums.length > 0 ? nums.reduce((s, n) => s + n, 0) / nums.length : 0;
+    } else {
+      result = nums.length;
+    }
+    // Format large numbers
+    result = result >= 1000 ? result.toLocaleString(undefined, { maximumFractionDigits: 1 })
+           : result >= 1 ? result.toFixed(1)
+           : result.toFixed(3);
+    // Add unit hint
+    if (aggCol.includes('Area')) unit = ' m²';
+    else if (aggCol.includes('Volume')) unit = ' m³';
+    else if (aggCol.includes('Length')) unit = ' m';
+  }
 
   el.classList.add("gs-widget-body--metric");
   el.innerHTML = `
-    <div class="gs-metric-value">${count}</div>
-    <div class="gs-metric-label">${esc(config.label || config.filterType)}</div>
+    <div class="gs-metric-value">${result}${unit ? `<span class="gs-metric-unit">${unit}</span>` : ''}</div>
+    <div class="gs-metric-label">${esc(config.label || config.filterType || 'Total')}</div>
   `;
 }
 
@@ -403,42 +431,67 @@ function showWidgetModal(editWidget) {
       `<option value="${c.key}">${esc(c.label)}</option>`
     ).join("");
 
+    const NUMERIC_COLS = COLUMNS.filter(c => ['Area', 'Volume', 'Length', 'expressID'].includes(c.key));
+
     if (type === "metric") {
       const selCol = curConfig.column || "Type";
       const selVal = curConfig.filterType || "";
+      const selAgg = curConfig.aggregation || "count";
+      const selAggCol = curConfig.aggColumn || "";
+
       fieldsEl.innerHTML = `
         <label for="aw-label">Label</label>
-        <input id="aw-label" type="text" value="${esc(curConfig.label || "")}" placeholder="e.g. Walls">
+        <input id="aw-label" type="text" value="${esc(curConfig.label || "")}" placeholder="e.g. Total Slab Area">
 
-        <label for="aw-column">Column</label>
+        <label for="aw-column">Filter by column</label>
         <select id="aw-column">
           ${COLUMNS.map((c) =>
             `<option value="${c.key}" ${c.key === selCol ? "selected" : ""}>${esc(c.label)}</option>`
           ).join("")}
         </select>
 
-        <label for="aw-value">Value (filter match)</label>
+        <label for="aw-value">Filter value</label>
         <select id="aw-value">
-          <option value="">All (total count)</option>
+          <option value="">All elements</option>
         </select>
 
         <label for="aw-agg">Aggregation</label>
         <select id="aw-agg">
-          <option value="count" selected>Count</option>
+          <option value="count" ${selAgg === "count" ? "selected" : ""}>Count</option>
+          <option value="sum" ${selAgg === "sum" ? "selected" : ""}>Sum</option>
+          <option value="avg" ${selAgg === "avg" ? "selected" : ""}>Average</option>
         </select>
+
+        <div id="aw-agg-col-group" style="display:none">
+          <label for="aw-agg-col">Sum / Average of</label>
+          <select id="aw-agg-col">
+            ${NUMERIC_COLS.map((c) =>
+              `<option value="${c.key}" ${c.key === selAggCol ? "selected" : ""}>${esc(c.label)}</option>`
+            ).join("")}
+          </select>
+        </div>
       `;
 
       const colSelect = fieldsEl.querySelector("#aw-column");
       const valSelect = fieldsEl.querySelector("#aw-value");
       const labelInput = fieldsEl.querySelector("#aw-label");
+      const aggSelect = fieldsEl.querySelector("#aw-agg");
+      const aggColGroup = fieldsEl.querySelector("#aw-agg-col-group");
+      const aggColSelect = fieldsEl.querySelector("#aw-agg-col");
+
+      function toggleAggCol() {
+        const needsCol = aggSelect.value === "sum" || aggSelect.value === "avg";
+        aggColGroup.style.display = needsCol ? "" : "none";
+        updatePreview();
+      }
 
       function populateValues() {
         const col = colSelect.value;
-        const uniqueVals = [...new Set(data.map((r) => String(r[col] ?? "")))].sort();
+        const uniqueVals = [...new Set(data.map((r) => String(r[col] ?? "")).filter(Boolean))].sort();
         valSelect.innerHTML =
-          `<option value="">All (total count)</option>` +
+          `<option value="">All elements</option>` +
           uniqueVals.map((v) =>
-            `<option value="${esc(v)}" ${v === selVal ? "selected" : ""}>${esc(v || "(empty)")}</option>`
+            `<option value="${esc(v)}" ${v === selVal ? "selected" : ""}>${esc(v)}</option>`
           ).join("");
         updatePreview();
       }
@@ -446,24 +499,61 @@ function showWidgetModal(editWidget) {
       function updatePreview() {
         const col = colSelect.value;
         const val = valSelect.value;
-        const count = val
-          ? data.filter((r) => String(r[col] ?? "") === val).length
-          : data.length;
+        const agg = aggSelect.value;
+        const aggCol = aggColSelect.value;
+
+        const filtered = val
+          ? data.filter((r) => String(r[col] ?? "") === val)
+          : data;
+
+        let result;
+        let unit = "";
+        if (agg === "count") {
+          result = filtered.length;
+        } else {
+          const nums = filtered.map((r) => parseFloat(r[aggCol])).filter((n) => !isNaN(n) && n > 0);
+          if (agg === "sum") result = nums.reduce((s, n) => s + n, 0);
+          else result = nums.length > 0 ? nums.reduce((s, n) => s + n, 0) / nums.length : 0;
+          result = result >= 1000 ? result.toLocaleString(undefined, { maximumFractionDigits: 1 }) : result.toFixed(1);
+          if (aggCol.includes('Area')) unit = ' m²';
+          else if (aggCol.includes('Volume')) unit = ' m³';
+          else if (aggCol.includes('Length')) unit = ' m';
+        }
+
         const label = labelInput.value || val || "Total";
-        previewEl.innerHTML = `<span class="aw-preview-num">${count}</span> <span class="aw-preview-label">${esc(label)}</span>`;
+        previewEl.innerHTML = `<span class="aw-preview-num">${result}${unit}</span> <span class="aw-preview-label">${esc(label)}</span>`;
       }
 
       colSelect.addEventListener("change", () => {
         populateValues();
         if (!labelInput.value || labelInput.dataset.auto === "1") {
-          labelInput.value = valSelect.value || colSelect.selectedOptions[0]?.text || "";
+          const aggLabel = aggSelect.value !== "count" ? ` ${aggSelect.selectedOptions[0]?.text} ${aggColSelect.selectedOptions[0]?.text}` : "";
+          labelInput.value = (valSelect.value || "All") + aggLabel;
           labelInput.dataset.auto = "1";
         }
       });
       valSelect.addEventListener("change", () => {
         updatePreview();
         if (!labelInput.value || labelInput.dataset.auto === "1") {
-          labelInput.value = valSelect.value || "Total";
+          const aggLabel = aggSelect.value !== "count" ? ` ${aggSelect.selectedOptions[0]?.text} ${aggColSelect.selectedOptions[0]?.text}` : "";
+          labelInput.value = (valSelect.value || "All") + aggLabel;
+          labelInput.dataset.auto = "1";
+        }
+      });
+      aggSelect.addEventListener("change", () => {
+        toggleAggCol();
+        if (!labelInput.value || labelInput.dataset.auto === "1") {
+          const filterLabel = valSelect.value || "All";
+          const aggLabel = aggSelect.value !== "count" ? ` ${aggSelect.selectedOptions[0]?.text} ${aggColSelect.selectedOptions[0]?.text}` : "";
+          labelInput.value = filterLabel + aggLabel;
+          labelInput.dataset.auto = "1";
+        }
+      });
+      aggColSelect.addEventListener("change", () => {
+        updatePreview();
+        if (!labelInput.value || labelInput.dataset.auto === "1") {
+          const filterLabel = valSelect.value || "All";
+          labelInput.value = `${filterLabel} ${aggSelect.selectedOptions[0]?.text} ${aggColSelect.selectedOptions[0]?.text}`;
           labelInput.dataset.auto = "1";
         }
       });
@@ -473,6 +563,7 @@ function showWidgetModal(editWidget) {
       });
 
       populateValues();
+      toggleAggCol();
     } else {
       const selCol = curConfig.column || "Type";
       fieldsEl.innerHTML = `
@@ -530,7 +621,9 @@ function showWidgetModal(editWidget) {
     let config;
     if (type === "metric") {
       const filterType = fieldsEl.querySelector("#aw-value")?.value || "";
-      config = { column, filterType, label: label || filterType || "Total" };
+      const aggregation = fieldsEl.querySelector("#aw-agg")?.value || "count";
+      const aggColumn = fieldsEl.querySelector("#aw-agg-col")?.value || "";
+      config = { column, filterType, aggregation, aggColumn, label: label || filterType || "Total" };
     } else {
       config = { column, label: label || `${WIDGET_TYPES[type].label}: ${column}` };
     }

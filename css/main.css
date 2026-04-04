@@ -208,9 +208,15 @@ button:disabled {
     color: var(--tbl-text);
     line-height: 1.1;
 }
+.gs-metric-unit {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-text-muted);
+    margin-left: 2px;
+}
 .gs-metric-label {
     font-size: 11px;
-    color: var(--tbl-text-muted);
+    color: var(--color-text-muted);
     margin-top: 2px;
 }
 

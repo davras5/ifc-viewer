@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Read(//c/Users/DavidRasner/Documents/GitHub/landcover-survey/**)"
+      "Read(//c/Users/DavidRasner/Documents/GitHub/landcover-survey/**)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:json-render.dev)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

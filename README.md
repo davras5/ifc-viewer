@@ -6,6 +6,11 @@ A browser-based BIM viewer that loads IFC files locally with an interactive data
 
 ![Preview](assets/Preview1.jpg)
 
+<p align="center">
+  <img src="assets/Preview2.jpg" width="45%" style="vertical-align: top;"/>
+  <img src="assets/Preview3.jpg" width="45%" style="vertical-align: top;"/>
+</p>
+
 ## Features
 
 - **3D IFC Viewer** — Load `.ifc` files via drag-and-drop or file picker. Smooth orbit controls with damping. Click any element to highlight it and inspect its properties.

@@ -1,5 +1,7 @@
 # IFC Viewer
 
+![Preview](assets/Social1.jpg)
+
 A browser-based BIM viewer that loads IFC files locally with an interactive data table, color-by-attribute visualization, and Excel export. Built with `web-ifc-three` and `SheetJS` — runs entirely in the browser, no build tools or backend required.
 
 - Deployed: [davras5.github.io/ifc-viewer/](https://davras5.github.io/ifc-viewer/)

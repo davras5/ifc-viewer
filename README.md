@@ -1,10 +1,17 @@
 # IFC Viewer
 
+[![Live Demo](https://img.shields.io/badge/demo-live-brightgreen?style=flat-square)](https://davras5.github.io/ifc-viewer/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](https://opensource.org/licenses/MIT)
+[![Three.js](https://img.shields.io/badge/Three.js-0.155.0-black?style=flat-square&logo=threedotjs)](https://threejs.org/)
+[![web-ifc](https://img.shields.io/badge/web--ifc-WASM-purple?style=flat-square)](https://github.com/thatopen/engine_web-ifc)
+[![No Build](https://img.shields.io/badge/build-none-orange?style=flat-square)](#)
+[![JavaScript](https://img.shields.io/badge/vanilla-JS-yellow?style=flat-square&logo=javascript&logoColor=black)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
+
 ![Preview](assets/Social1.jpg)
 
 A browser-based BIM viewer that loads IFC files locally with an interactive data table, color-by-attribute visualization, and Excel export. Built with `web-ifc-three` and `SheetJS` — runs entirely in the browser, no build tools or backend required.
 
-- Deployed: [davras5.github.io/ifc-viewer/](https://davras5.github.io/ifc-viewer/)
+**[Live Demo →](https://davras5.github.io/ifc-viewer/)**
 
 ![Preview](assets/Preview1.jpg)
 
